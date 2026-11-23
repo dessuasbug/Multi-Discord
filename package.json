@@ -1,6 +1,6 @@
 {
   "name": "multi-discord",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Run several Discord accounts side by side in one window",
   "main": "main.js",
   "scripts": {

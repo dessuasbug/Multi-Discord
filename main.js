@@ -465,6 +465,18 @@ function flushAll() {
     } catch { /* ignore */ }
   }
 }
+// Discord's page keeps its login out of storage while it runs and writes it back when the
+// page unloads. Quitting without letting that happen loses the login, so fire the page's
+// unload handlers and navigate away for real before the app exits.
+const UNLOAD_JS = `(() => {
+  try {
+    window.dispatchEvent(new Event('beforeunload', { cancelable: true }));
+    window.dispatchEvent(new Event('pagehide'));
+    window.dispatchEvent(new Event('unload'));
+  } catch (e) {}
+  return true;
+})()`;
+
 function gracefulShutdown(done) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -474,13 +486,27 @@ function gracefulShutdown(done) {
   for (const w of [win, settingsWin, ...[...popouts.values()].map((p) => p.win)]) {
     try { if (w && !w.isDestroyed()) w.hide(); } catch { /* ignore */ }
   }
-  flushAll();
-  for (const v of views.values()) { try { v.webContents.close(); } catch { /* ignore */ } }
+  // 1. run the pages' own unload handlers
+  for (const v of views.values()) {
+    try { v.webContents.executeJavaScript(UNLOAD_JS).catch(() => {}); } catch { /* ignore */ }
+  }
+  // 2. then leave the page for real so the browser unloads it properly
+  setTimeout(() => {
+    flushAll();
+    for (const v of views.values()) {
+      try { v.webContents.loadURL('about:blank').catch(() => {}); } catch { /* ignore */ }
+    }
+  }, 350);
+  // 3. write everything to disk and exit
+  setTimeout(() => {
+    flushAll();
+    for (const v of views.values()) { try { v.webContents.close(); } catch { /* ignore */ } }
+  }, 1000);
   setTimeout(() => {
     flushAll();
     quitting = true;
     (done || (() => app.quit()))();
-  }, 900);
+  }, 1250);
 }
 
 // ---------- window size and position ----------
@@ -551,6 +577,7 @@ function createView(a) {
   });
 
   view.webContents.on('dom-ready', () => applyAccount(a.id, { css: true }));
+  view.webContents.on('will-prevent-unload', (e) => e.preventDefault());
   hookShortcuts(view.webContents);
 
   view.setVisible(false);
@@ -803,7 +830,7 @@ function setupUpdater() {
       message: `Multi Discord ${i.version} is ready`,
       detail: 'Restart to finish updating. It will also install the next time you close the app.',
     });
-    if (response === 0) { quitting = true; autoUpdater.quitAndInstall(); }
+    if (response === 0) gracefulShutdown(() => autoUpdater.quitAndInstall());
   });
 }
 
