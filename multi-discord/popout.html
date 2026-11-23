@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pop-out</title>
+<style>
+  :root {
+    --bg: #17181c; --bg-deep: #121317; --hover: #22242a; --active: #2f3340; --text: #e3e5ea;
+    --muted: #8a8f9c; --line: #3a3e4b; --accent: #7d8cff; --on-accent: #fff;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 10px 0 12px;
+    background: var(--bg); color: var(--text); border-bottom: 1px solid var(--line);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; user-select: none; -webkit-user-select: none;
+  }
+  .who { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .avatar {
+    flex: none; width: 22px; height: 22px; border-radius: 50%; overflow: hidden;
+    display: grid; place-items: center; font-size: 12px; font-weight: 600; color: #fff;
+  }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; }
+  #name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .btns { display: flex; gap: 6px; flex: none; }
+  button {
+    display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
+    border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--muted);
+    font: inherit; cursor: pointer;
+  }
+  button:hover, button:focus-visible { background: var(--hover); color: var(--text); outline: none; }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  svg { flex: none; }
+</style>
+</head>
+<body>
+  <div class="who"><div class="avatar" id="av"></div><span id="name"></span></div>
+  <div class="btns">
+    <button id="top" aria-pressed="false" title="Keep this window above other windows">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+      Always on top
+    </button>
+    <button id="dock" title="Move this account back into the main window">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5v14"/><path d="M21 12H7"/><path d="m15 18-6-6 6-6"/></svg>
+      Dock back
+    </button>
+  </div>
+<script>
+  const id = new URLSearchParams(location.search).get('id');
+  function applyTheme(t) {
+    const root = document.documentElement.style;
+    for (const [k, v] of Object.entries(t.vars)) root.setProperty(k, v);
+    root.colorScheme = t.scheme;
+    const n = parseInt(t.vars['--accent'].slice(1), 16);
+    const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    root.setProperty('--on-accent', lum > 0.6 ? '#111' : '#fff');
+  }
+  function colorFor(s) {
+    let h = 0;
+    for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360;
+    return `hsl(${h} 45% 42%)`;
+  }
+  function render(s) {
+    applyTheme(s.theme);
+    const a = s.accounts.find((x) => x.id === id);
+    if (!a) return;
+    document.getElementById('name').textContent = a.name;
+    const av = document.getElementById('av');
+    av.textContent = '';
+    av.style.background = a.color || colorFor(a.id);
+    if (a.icon && a.icon.type === 'image') {
+      const img = document.createElement('img'); img.src = a.icon.value; img.alt = ''; av.append(img);
+    } else if (a.icon && a.icon.type === 'emoji') {
+      av.textContent = a.icon.value;
+    } else {
+      av.textContent = (a.name[0] || '?').toUpperCase();
+    }
+    document.getElementById('top').setAttribute('aria-pressed', String(!!a.onTop));
+  }
+  document.getElementById('top').addEventListener('click', () => window.api.popToggleTop());
+  document.getElementById('dock').addEventListener('click', () => window.api.popDock());
+  window.api.onState(render);
+  window.api.getState().then(render);
+</script>
+</body>
+</html>

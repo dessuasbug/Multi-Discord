@@ -1,0 +1,69 @@
+{
+  "name": "multi-discord",
+  "version": "1.2.0",
+  "description": "Run several Discord accounts side by side in one window",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --x64 --publish never",
+    "dist:portable": "electron-builder --win zip --x64 --publish never -c.win.signAndEditExecutable=false"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.local.multidiscord",
+    "productName": "Multi Discord",
+    "files": [
+      "main.js",
+      "preload.js",
+      "page-preload.js",
+      "*.html",
+      "assets/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Multi Discord",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "artifactName": "Multi-Discord-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://example.com/multi-discord-updates"
+      }
+    ],
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "author": "Multi Discord"
+}

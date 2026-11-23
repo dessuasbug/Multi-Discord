@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Multi Discord settings</title>
+<style>
+  :root {
+    --bg: #17181c; --bg-deep: #121317; --hover: #22242a; --active: #2f3340; --text: #e3e5ea;
+    --muted: #8a8f9c; --line: #3a3e4b; --field: #101114; --accent: #7d8cff; --on-accent: #fff;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  [hidden] { display: none !important; }
+  nav { width: 190px; flex: none; padding: 20px 10px; border-right: 1px solid var(--line); }
+  nav h1 { font-size: 16px; margin: 0 8px 14px; }
+  nav button {
+    display: block; width: 100%; text-align: left; padding: 9px 12px; margin-bottom: 2px;
+    border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: inherit; cursor: pointer;
+  }
+  nav button:hover { background: var(--hover); color: var(--text); }
+  nav button.on { background: color-mix(in srgb, var(--accent) 18%, var(--bg)); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
+  button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  main { flex: 1; min-width: 0; overflow-y: auto; padding: 24px 32px 40px; }
+  h2 { font-size: 14px; font-weight: 600; margin: 26px 0 10px; }
+  h2:first-child { margin-top: 0; }
+  .note { color: var(--muted); font-size: 12.5px; margin: 4px 0 0; }
+
+  h3 { font-size: 12.5px; font-weight: 500; color: var(--muted); margin: 14px 0 8px; }
+  h3:first-of-type { margin-top: 0; }
+  .themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+  .theme {
+    padding: 8px; border: 2px solid var(--line); border-radius: 10px; background: transparent;
+    color: var(--text); font: inherit; cursor: pointer; text-align: left;
+  }
+  .theme.on { border-color: var(--accent); }
+  .theme .prev { display: flex; align-items: center; gap: 6px; height: 44px; border-radius: 6px; padding: 0 8px; margin-bottom: 6px; border: 1px solid rgba(128,128,128,.25); }
+  .theme .prev i { display: block; height: 10px; border-radius: 5px; }
+  .theme .prev i:first-child { flex: 1; }
+  .theme .prev i:last-child { width: 14px; height: 14px; border-radius: 50%; }
+
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+  .swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+  .swatch.on { border-color: var(--text); box-shadow: 0 0 0 2px var(--bg) inset; }
+  input[type=color] { width: 34px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--field); cursor: pointer; }
+
+  .switch { display: flex; align-items: center; gap: 12px; padding: 7px 0; cursor: pointer; }
+  .switch input {
+    appearance: none; -webkit-appearance: none; flex: none; width: 36px; height: 20px; border-radius: 10px;
+    background: var(--line); position: relative; cursor: pointer; margin: 0;
+  }
+  .switch input::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff;
+  }
+  .switch input:checked { background: var(--accent); }
+  .switch input:checked::after { transform: translateX(16px); }
+  @media (prefers-reduced-motion: no-preference) {
+    .switch input, .switch input::after { transition: background .15s, transform .15s; }
+  }
+
+  .acct-layout { display: flex; gap: 24px; align-items: flex-start; }
+  #acctList { list-style: none; margin: 0; padding: 0; width: 180px; flex: none; }
+  #acctList button {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; margin-bottom: 2px;
+    border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; cursor: pointer; text-align: left;
+  }
+  #acctList button:hover { background: var(--hover); }
+  #acctList button.on { background: color-mix(in srgb, var(--accent) 18%, var(--bg)); box-shadow: inset 3px 0 0 var(--accent); }
+  #acctList .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .avatar { flex: none; width: 24px; height: 24px; border-radius: 50%; overflow: hidden; display: grid; place-items: center; font-size: 12px; font-weight: 600; color: #fff; }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; }
+  #acctForm { flex: 1; min-width: 0; max-width: 520px; }
+
+  input[type=text], textarea {
+    width: 100%; padding: 8px 10px; background: var(--field); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; font: inherit;
+  }
+  input[type=text]:focus, textarea:focus { border-color: var(--accent); outline: none; }
+  textarea { min-height: 150px; resize: vertical; font-family: ui-monospace, Consolas, "Cascadia Mono", monospace; font-size: 12.5px; }
+  .btn {
+    padding: 7px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--hover);
+    color: var(--text); font: inherit; cursor: pointer;
+  }
+  .btn:hover { background: var(--active); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  #aEmoji { width: 120px; }
+  input[type=range] { width: 220px; accent-color: var(--accent); }
+</style>
+</head>
+<body>
+  <nav>
+    <h1>Settings</h1>
+    <button data-tab="appearance">Appearance</button>
+    <button data-tab="account">Accounts</button>
+    <button data-tab="updates">Updates</button>
+  </nav>
+
+  <main>
+    <section id="tab-appearance">
+      <h2>Theme</h2>
+      <h3>Dark</h3>
+      <div id="themesDark" class="themes"></div>
+      <h3>Light</h3>
+      <div id="themesLight" class="themes"></div>
+      <p class="note">Picking a theme also picks a matching accent color. You can change the accent below.</p>
+
+      <h2>Accent color</h2>
+      <div class="row">
+        <div id="accentSwatches" class="swatches"></div>
+        <input type="color" id="accentPicker" aria-label="Custom accent color">
+      </div>
+
+      <h2>Layout</h2>
+      <label class="switch"><input type="checkbox" id="compact"><span>Compact sidebar (icons only)</span></label>
+      <label class="switch"><input type="checkbox" id="collapsed"><span>Collapse the sidebar into a thin strip (Ctrl+B)</span></label>
+      <label class="switch"><input type="checkbox" id="hideMenu"><span>Hide the Edit / Accounts / View menu bar</span></label>
+
+      <h2>Do Not Disturb</h2>
+      <label class="switch"><input type="checkbox" id="dnd"><span>Silence desktop notifications from every account</span></label>
+      <p class="note">Messages still arrive and badges still update. You can also toggle this with the moon button in the sidebar or Ctrl+Shift+D.</p>
+    </section>
+
+    <section id="tab-updates" hidden>
+      <h2>Version</h2>
+      <p id="uVersion" style="margin:0"></p>
+
+      <h2>Update address</h2>
+      <input type="text" id="uUrl" placeholder="https://github.com/YOU/multi-discord/releases/latest/download" spellcheck="false">
+      <p class="note">The web address of the folder that holds <b>latest.yml</b> and the installer. Saved when you click away.</p>
+      <label class="switch"><input type="checkbox" id="uAuto"><span>Check for updates when the app starts</span></label>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" id="uCheck" type="button">Check for updates</button>
+        <span class="note" id="uStatus" style="margin:0"></span>
+      </div>
+    </section>
+
+    <section id="tab-account" hidden>
+      <div class="acct-layout">
+        <ul id="acctList"></ul>
+        <div id="acctForm">
+          <h2>Name</h2>
+          <input type="text" id="aName" maxlength="24" spellcheck="false">
+
+          <h2>Color</h2>
+          <div class="row">
+            <div id="aSwatches" class="swatches"></div>
+            <input type="color" id="aColor" aria-label="Custom account color">
+            <button class="btn" id="aColorReset" type="button">Reset</button>
+          </div>
+
+          <h2>Icon</h2>
+          <div class="row">
+            <input type="text" id="aEmoji" placeholder="Type an emoji" spellcheck="false">
+            <button class="btn" id="aPick" type="button">Choose image…</button>
+            <button class="btn" id="aIconClear" type="button">Remove icon</button>
+          </div>
+          <p class="note" id="iconMsg">An image replaces the letter in the sidebar. It's cropped to a square.</p>
+
+          <h2>Notifications and sound</h2>
+          <label class="switch"><input type="checkbox" id="aMuteN"><span>Mute notifications for this account</span></label>
+          <label class="switch"><input type="checkbox" id="aMuteA"><span>Mute all sound, including voice calls</span></label>
+
+          <h2>Zoom</h2>
+          <div class="row">
+            <input type="range" id="aZoom" min="50" max="200" step="10" aria-label="Zoom">
+            <span id="aZoomLabel">100%</span>
+            <button class="btn" id="aZoomReset" type="button">Reset</button>
+          </div>
+
+          <h2>Custom CSS</h2>
+          <textarea id="aCss" spellcheck="false" placeholder="/* Styles applied only to this account */
+html { filter: saturate(0.85); }"></textarea>
+          <div class="row" style="margin-top:10px">
+            <button class="btn primary" id="aCssApply" type="button">Apply CSS</button>
+            <span class="note" style="margin:0">Ctrl+Enter also applies. Discord's class names change often, so some rules may stop working after updates.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const params = new URLSearchParams(location.search);
+  let tab = ['account', 'updates'].includes(params.get('tab')) ? params.get('tab') : 'appearance';
+  let selId = params.get('account') || null;
+  let state = null;
+
+  const SWATCHES = ['#5865f2', '#3ba55d', '#faa61a', '#ed4245', '#eb459e', '#00b0f4', '#9b59b6', '#e67e22', '#1abc9c', '#747f8d'];
+
+  function applyTheme(t) {
+    const root = document.documentElement.style;
+    for (const [k, v] of Object.entries(t.vars)) root.setProperty(k, v);
+    root.colorScheme = t.scheme;
+    const n = parseInt(t.vars['--accent'].slice(1), 16);
+    const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    root.setProperty('--on-accent', lum > 0.6 ? '#111' : '#fff');
+  }
+
+  // Don't overwrite a field while the person is typing in it.
+  const setVal = (el, v) => { if (document.activeElement !== el) el.value = v; };
+
+  function swatchRow(container, current, onPick) {
+    container.textContent = '';
+    for (const c of SWATCHES) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'swatch' + (current && current.toLowerCase() === c ? ' on' : '');
+      b.style.background = c;
+      b.title = c;
+      b.setAttribute('aria-label', `Color ${c}`);
+      b.addEventListener('click', () => onPick(c));
+      container.append(b);
+    }
+  }
+
+  function colorFor(id) {
+    let h = 0;
+    for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360;
+    return `hsl(${h} 45% 42%)`;
+  }
+
+  function miniAvatar(a) {
+    const av = document.createElement('div');
+    av.className = 'avatar';
+    av.style.background = a.color || colorFor(a.id);
+    if (a.icon && a.icon.type === 'image') {
+      const img = document.createElement('img');
+      img.src = a.icon.value; img.alt = '';
+      av.append(img);
+    } else if (a.icon && a.icon.type === 'emoji') {
+      av.textContent = a.icon.value;
+    } else {
+      av.textContent = (a.name[0] || '?').toUpperCase();
+    }
+    return av;
+  }
+
+  function sync() {
+    if (!state) return;
+    applyTheme(state.theme);
+    const s = state.settings;
+
+    document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+    $('tab-appearance').hidden = tab !== 'appearance';
+    $('tab-account').hidden = tab !== 'account';
+    $('tab-updates').hidden = tab !== 'updates';
+
+    // Appearance
+    for (const [boxId, scheme] of [['themesDark', 'dark'], ['themesLight', 'light']]) {
+      const tg = $(boxId);
+      tg.textContent = '';
+      for (const t of state.themes.filter((x) => x.scheme === scheme)) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'theme' + (t.id === s.theme ? ' on' : '');
+        const prev = document.createElement('span');
+        prev.className = 'prev';
+        prev.style.background = t.vars['--bg'];
+        const bar = document.createElement('i'); bar.style.background = t.vars['--active'];
+        const dot = document.createElement('i'); dot.style.background = t.accent;
+        prev.append(bar, dot);
+        const label = document.createElement('span');
+        label.textContent = t.label;
+        b.append(prev, label);
+        b.addEventListener('click', () => window.api.updateSettings({ theme: t.id }));
+        tg.append(b);
+      }
+    }
+    swatchRow($('accentSwatches'), s.accent, (c) => window.api.updateSettings({ accent: c }));
+    setVal($('accentPicker'), s.accent);
+    $('compact').checked = !!s.compact;
+    $('collapsed').checked = !!s.collapsed;
+    $('hideMenu').checked = !!s.hideMenuBar;
+    $('dnd').checked = !!s.dnd;
+
+    // Updates
+    const u = state.updater || {};
+    $('uVersion').textContent = 'Multi Discord ' + (u.version || '');
+    setVal($('uUrl'), s.updateUrl || '');
+    $('uAuto').checked = !!s.autoUpdate;
+    $('uStatus').textContent = u.message || (u.packaged ? '' : 'Updates only work in the installed app.');
+    $('uCheck').disabled = u.status === 'checking' || u.status === 'downloading';
+
+    // Accounts
+    if (!state.accounts.some((a) => a.id === selId)) selId = state.activeId;
+    const list = $('acctList');
+    list.textContent = '';
+    for (const a of state.accounts) {
+      const li = document.createElement('li');
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = a.id === selId ? 'on' : '';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = a.name;
+      b.append(miniAvatar(a), name);
+      b.addEventListener('click', () => { selId = a.id; sync(); });
+      li.append(b);
+      list.append(li);
+    }
+    const a = state.accounts.find((x) => x.id === selId);
+    if (!a) return;
+    setVal($('aName'), a.name);
+    swatchRow($('aSwatches'), a.color, (c) => window.api.updateAccount(a.id, { color: c }));
+    setVal($('aColor'), a.color || '#5865f2');
+    setVal($('aEmoji'), a.icon && a.icon.type === 'emoji' ? a.icon.value : '');
+    $('aMuteN').checked = a.muteNotifications;
+    $('aMuteA').checked = a.muteAudio;
+    setVal($('aZoom'), Math.round(a.zoom * 100));
+    $('aZoomLabel').textContent = Math.round(a.zoom * 100) + '%';
+    if (document.activeElement !== $('aCss') && $('aCss').dataset.id !== a.id) $('aCss').value = a.css;
+    $('aCss').dataset.id = a.id;
+  }
+
+  const cur = () => selId;
+
+  document.querySelectorAll('nav button').forEach((b) =>
+    b.addEventListener('click', () => { tab = b.dataset.tab; sync(); }));
+
+  $('accentPicker').addEventListener('input', (e) => window.api.updateSettings({ accent: e.target.value }));
+  $('compact').addEventListener('change', (e) => window.api.updateSettings({ compact: e.target.checked }));
+  $('hideMenu').addEventListener('change', (e) => window.api.updateSettings({ hideMenuBar: e.target.checked }));
+  $('dnd').addEventListener('change', (e) => window.api.updateSettings({ dnd: e.target.checked }));
+  $('collapsed').addEventListener('change', (e) => window.api.updateSettings({ collapsed: e.target.checked }));
+  $('uUrl').addEventListener('change', (e) => window.api.updateSettings({ updateUrl: e.target.value }));
+  $('uUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
+  $('uAuto').addEventListener('change', (e) => window.api.updateSettings({ autoUpdate: e.target.checked }));
+  $('uCheck').addEventListener('click', () => {
+    window.api.updateSettings({ updateUrl: $('uUrl').value });
+    window.api.checkUpdates();
+  });
+
+  $('aName').addEventListener('change', (e) => window.api.updateAccount(cur(), { name: e.target.value }));
+  $('aName').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
+  $('aColor').addEventListener('input', (e) => window.api.updateAccount(cur(), { color: e.target.value }));
+  $('aColorReset').addEventListener('click', () => window.api.updateAccount(cur(), { color: null }));
+  $('aEmoji').addEventListener('change', (e) => window.api.updateAccount(cur(), { icon: { type: 'emoji', value: e.target.value } }));
+  $('aIconClear').addEventListener('click', () => { $('iconMsg').textContent = ''; window.api.updateAccount(cur(), { icon: null }); });
+  $('aPick').addEventListener('click', async () => {
+    const r = await window.api.pickIcon(cur());
+    if (r === 'error') $('iconMsg').textContent = "Couldn't read that image. Try a PNG or JPG.";
+    else if (r === 'ok') $('iconMsg').textContent = 'Icon updated.';
+  });
+  $('aMuteN').addEventListener('change', (e) => window.api.updateAccount(cur(), { muteNotifications: e.target.checked }));
+  $('aMuteA').addEventListener('change', (e) => window.api.updateAccount(cur(), { muteAudio: e.target.checked }));
+  $('aZoom').addEventListener('input', (e) => window.api.updateAccount(cur(), { zoom: Number(e.target.value) / 100 }));
+  $('aZoomReset').addEventListener('click', () => window.api.updateAccount(cur(), { zoom: 1 }));
+
+  function applyCss() {
+    window.api.updateAccount(cur(), { css: $('aCss').value });
+    const b = $('aCssApply');
+    b.textContent = 'Applied';
+    setTimeout(() => { b.textContent = 'Apply CSS'; }, 1500);
+  }
+  $('aCssApply').addEventListener('click', applyCss);
+  $('aCss').addEventListener('keydown', (e) => { if (e.ctrlKey && e.key === 'Enter') applyCss(); });
+
+  window.api.onState((s) => { state = s; sync(); });
+  window.api.getState().then((s) => { state = s; sync(); });
+</script>
+</body>
+</html>

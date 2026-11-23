@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Accounts</title>
+<style>
+  :root {
+    --bg: #17181c; --bg-deep: #121317; --hover: #22242a; --active: #2f3340; --text: #e3e5ea;
+    --muted: #8a8f9c; --line: #3a3e4b; --field: #101114; --accent: #7d8cff; --on-accent: #fff;
+    --alert: #f04747;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column;
+    background: linear-gradient(180deg, var(--bg), var(--bg-deep)); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    user-select: none; -webkit-user-select: none; overflow: hidden;
+  }
+  .head { position: relative; display: flex; align-items: center; justify-content: space-between; padding: 14px 10px 8px 16px; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0; }
+  .icon-btn {
+    flex: none; width: 28px; height: 28px; border: 0; border-radius: 6px; padding: 0;
+    display: grid; place-items: center; background: transparent; color: var(--muted); cursor: pointer;
+  }
+  .icon-btn:hover, .icon-btn:focus-visible { background: var(--hover); color: var(--text); outline: none; }
+  ul { list-style: none; margin: 0; padding: 0 8px; overflow-y: auto; flex: 1; }
+  li {
+    position: relative; display: flex; align-items: center; gap: 10px;
+    height: 48px; padding: 0 8px 0 10px; margin-bottom: 2px;
+    border-radius: 8px; cursor: pointer; outline: none;
+  }
+  li:hover { background: var(--hover); }
+  li:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+  li.active {
+    background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  li.drop-before { box-shadow: 0 -2px 0 var(--accent); }
+  li.drop-after { box-shadow: 0 2px 0 var(--accent); }
+  .avatar {
+    flex: none; width: 30px; height: 30px; border-radius: 50%; overflow: hidden;
+    display: grid; place-items: center; font-weight: 600; color: #fff;
+  }
+  .avatar.emoji { font-size: 16px; }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+  .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag { flex: none; color: var(--muted); display: grid; }
+  .badge {
+    flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;
+    background: var(--alert); color: #fff; font-size: 12px; font-weight: 600;
+    display: grid; place-items: center;
+  }
+  .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text); }
+  .edit {
+    flex: none; width: 24px; height: 24px; border: 0; border-radius: 6px; padding: 0;
+    display: none; place-items: center; background: transparent; color: var(--muted); cursor: pointer;
+  }
+  li:hover .edit, li:focus-within .edit { display: grid; }
+  .edit:hover { background: var(--line); color: var(--text); }
+  input[type=text] {
+    flex: 1; min-width: 0; height: 28px; padding: 0 8px;
+    background: var(--field); color: var(--text);
+    border: 1px solid var(--accent); border-radius: 6px; font: inherit; outline: none;
+    user-select: text; -webkit-user-select: text;
+  }
+  footer { padding: 8px 8px 12px; }
+  .add {
+    width: 100%; height: 40px; border: 1px dashed var(--line); border-radius: 8px;
+    background: transparent; color: var(--muted); font: inherit; cursor: pointer;
+  }
+  .add:hover, .add:focus-visible { color: var(--text); border-color: var(--accent); outline: none; }
+  .add .plus { display: none; font-size: 18px; line-height: 1; }
+  .tools { display: flex; gap: 6px; margin-top: 8px; }
+  .tool {
+    position: relative; flex: 1; height: 36px; border: 0; border-radius: 8px; background: var(--hover); color: var(--muted);
+    display: grid; place-items: center; cursor: pointer;
+  }
+  .tool:hover, .tool:focus-visible { color: var(--text); background: var(--active); outline: none; }
+  .tool.on { background: var(--accent); color: var(--on-accent); }
+  .count {
+    position: absolute; top: -4px; right: 4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+    background: var(--alert); color: #fff; font-size: 11px; font-weight: 600; display: grid; place-items: center;
+  }
+  p.hint { margin: 10px 8px 0; font-size: 12px; color: var(--muted); }
+  .strip-dot { display: none; position: absolute; top: 6px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--alert); }
+
+  body.compact h1, body.compact .name, body.compact .edit, body.compact .tag,
+  body.compact p.hint, body.compact .add .label { display: none !important; }
+  body.compact .head { justify-content: center; padding: 14px 0 8px; }
+  body.compact ul { padding: 8px 6px 0; }
+  body.compact li { justify-content: center; padding: 0; height: 52px; }
+  body.compact .badge { position: absolute; top: 2px; right: 4px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; }
+  body.compact .dot { position: absolute; top: 8px; right: 10px; }
+  body.compact .add .plus { display: inline; }
+  body.compact .tools { flex-direction: column; }
+
+  body.collapsed h1, body.collapsed ul, body.collapsed footer { display: none; }
+  body.collapsed .head { padding: 10px 0; justify-content: center; }
+  body.collapsed .icon-btn { width: 20px; height: 44px; border-radius: 4px; }
+  body.collapsed.alert .strip-dot { display: block; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <h1>Accounts</h1>
+    <button id="collapse" class="icon-btn" aria-label="Collapse sidebar"></button>
+    <span class="strip-dot"></span>
+  </div>
+  <ul id="list"></ul>
+  <footer>
+    <button id="add" class="add" title="Add account"><span class="label">Add account</span><span class="plus">+</span></button>
+    <div class="tools">
+      <button id="bell" class="tool" aria-label="Notification center"></button>
+      <button id="dnd" class="tool" aria-label="Do Not Disturb"></button>
+      <button id="gear" class="tool" title="Settings" aria-label="Settings"></button>
+    </div>
+    <p class="hint">Right-click an account for more options. Drag one out of the window to pop it out.</p>
+  </footer>
+
+<script>
+  const svg = (inner, size = 16) =>
+    `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+  const ICON = {
+    pencil: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>', 14),
+    gear: svg('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>', 18),
+    moon: svg('<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>', 18),
+    bell: svg('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>', 18),
+    bellOff: svg('<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>', 14),
+    external: svg('<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>', 14),
+    chevL: svg('<path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/>', 16),
+    chevR: svg('<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>', 16),
+  };
+
+  let state = { accounts: [], activeId: null, settings: {}, theme: null, unreadNotifs: 0, notifOpen: false };
+  let editing = null; // an account id (rename) or 'new' (add)
+  let dragId = null;
+  const list = document.getElementById('list');
+  const bellBtn = document.getElementById('bell');
+  const dndBtn = document.getElementById('dnd');
+  const gearBtn = document.getElementById('gear');
+  const collapseBtn = document.getElementById('collapse');
+  dndBtn.innerHTML = ICON.moon;
+  gearBtn.innerHTML = ICON.gear;
+
+  function applyTheme(t) {
+    if (!t) return;
+    const root = document.documentElement.style;
+    for (const [k, v] of Object.entries(t.vars)) root.setProperty(k, v);
+    root.colorScheme = t.scheme;
+    const n = parseInt(t.vars['--accent'].slice(1), 16);
+    const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    root.setProperty('--on-accent', lum > 0.6 ? '#111' : '#fff');
+  }
+
+  function colorFor(id) {
+    let h = 0;
+    for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360;
+    return `hsl(${h} 45% 42%)`;
+  }
+
+  function makeAvatar(a) {
+    const av = document.createElement('div');
+    av.className = 'avatar';
+    av.style.background = a.color || colorFor(a.id);
+    if (a.icon && a.icon.type === 'image') {
+      const img = document.createElement('img');
+      img.src = a.icon.value;
+      img.alt = '';
+      av.append(img);
+      if (!a.color) av.style.background = 'transparent';
+    } else if (a.icon && a.icon.type === 'emoji') {
+      av.classList.add('emoji');
+      av.textContent = a.icon.value;
+    } else {
+      av.textContent = (a.name[0] || '?').toUpperCase();
+    }
+    return av;
+  }
+
+  // onDone gets the typed text, or null if cancelled.
+  function makeInput(value, onDone) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = value;
+    input.maxLength = 24;
+    input.spellcheck = false;
+    let finished = false;
+    const finish = (commit) => {
+      if (finished) return;
+      finished = true;
+      onDone(commit ? input.value.trim() : null);
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') finish(true);
+      else if (e.key === 'Escape') finish(false);
+      e.stopPropagation();
+    });
+    input.addEventListener('blur', () => finish(input.value.trim().length > 0));
+    input.addEventListener('click', (e) => e.stopPropagation());
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+    return input;
+  }
+
+  function clearDropMarks() {
+    document.querySelectorAll('.drop-before,.drop-after').forEach((el) => el.classList.remove('drop-before', 'drop-after'));
+  }
+
+  function render() {
+    applyTheme(state.theme);
+    const s = state.settings;
+    const compact = !!s.compact;
+    document.body.classList.toggle('compact', compact);
+    document.body.classList.toggle('collapsed', !!s.collapsed);
+    collapseBtn.innerHTML = s.collapsed ? ICON.chevR : ICON.chevL;
+    collapseBtn.title = s.collapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)';
+    collapseBtn.setAttribute('aria-label', collapseBtn.title);
+
+    const anyAlert = state.unreadNotifs > 0 || state.accounts.some((a) => a.mentions > 0);
+    document.body.classList.toggle('alert', anyAlert);
+
+    const dnd = !!s.dnd;
+    dndBtn.classList.toggle('on', dnd);
+    dndBtn.title = dnd ? 'Do Not Disturb is on' : 'Do Not Disturb is off';
+    dndBtn.setAttribute('aria-pressed', String(dnd));
+
+    bellBtn.innerHTML = ICON.bell + (state.unreadNotifs > 0 ? `<span class="count">${state.unreadNotifs > 99 ? '99+' : state.unreadNotifs}</span>` : '');
+    bellBtn.classList.toggle('on', !!state.notifOpen);
+    bellBtn.title = 'Notification center (Ctrl+Shift+N)';
+
+    list.textContent = '';
+    for (const a of state.accounts) {
+      const li = document.createElement('li');
+      li.tabIndex = 0;
+      li.title = a.popped ? `${a.name} (in its own window)` : a.name;
+      li.draggable = editing !== a.id;
+      if (a.id === state.activeId && !a.popped) li.className = 'active';
+      li.append(makeAvatar(a));
+
+      if (editing === a.id && !compact) {
+        li.append(makeInput(a.name, (v) => {
+          editing = null;
+          if (v) window.api.updateAccount(a.id, { name: v }); else render();
+        }));
+      } else {
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = a.name;
+        li.append(name);
+      }
+
+      if (a.popped) {
+        const p = document.createElement('span');
+        p.className = 'tag';
+        p.title = 'Open in its own window';
+        p.innerHTML = ICON.external;
+        li.append(p);
+      }
+      if (a.muteNotifications) {
+        const m = document.createElement('span');
+        m.className = 'tag';
+        m.title = 'Notifications muted';
+        m.innerHTML = ICON.bellOff;
+        li.append(m);
+      }
+      if (a.mentions > 0) {
+        const b = document.createElement('span');
+        b.className = 'badge';
+        b.textContent = a.mentions > 99 ? '99+' : a.mentions;
+        li.append(b);
+      } else if (a.unread) {
+        const d = document.createElement('span');
+        d.className = 'dot';
+        li.append(d);
+      }
+
+      if (editing !== a.id) {
+        const edit = document.createElement('button');
+        edit.className = 'edit';
+        edit.title = 'Rename';
+        edit.setAttribute('aria-label', `Rename ${a.name}`);
+        edit.innerHTML = ICON.pencil;
+        edit.addEventListener('click', (e) => { e.stopPropagation(); editing = a.id; render(); });
+        li.append(edit);
+      }
+
+      li.addEventListener('click', () => window.api.switchTo(a.id));
+      li.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === li) window.api.switchTo(a.id); });
+      li.addEventListener('dblclick', () => { editing = a.id; render(); });
+      li.addEventListener('contextmenu', (e) => { e.preventDefault(); window.api.menu(a.id); });
+
+      li.addEventListener('dragstart', (e) => {
+        dragId = a.id;
+        e.dataTransfer.setData('text/plain', a.id);
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      li.addEventListener('dragover', (e) => {
+        if (!dragId || dragId === a.id) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const r = li.getBoundingClientRect();
+        const after = e.clientY > r.top + r.height / 2;
+        li.classList.toggle('drop-before', !after);
+        li.classList.toggle('drop-after', after);
+      });
+      li.addEventListener('dragleave', () => li.classList.remove('drop-before', 'drop-after'));
+      li.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const r = li.getBoundingClientRect();
+        const after = e.clientY > r.top + r.height / 2;
+        clearDropMarks();
+        if (dragId && dragId !== a.id) window.api.reorder(dragId, a.id, after);
+      });
+      li.addEventListener('dragend', (e) => {
+        const id = dragId;
+        dragId = null;
+        clearDropMarks();
+        // Not dropped on another account: if the cursor left the window, pop the account out.
+        if (e.dataTransfer.dropEffect === 'none') window.api.dragEnd(id);
+        render();
+      });
+      list.append(li);
+    }
+
+    if (editing === 'new' && !compact) {
+      const li = document.createElement('li');
+      const av = document.createElement('div');
+      av.className = 'avatar';
+      av.style.background = 'var(--line)';
+      av.textContent = '+';
+      li.append(av, makeInput('', (v) => {
+        editing = null;
+        if (v !== null) window.api.add(v); else render();
+      }));
+      list.append(li);
+    }
+  }
+
+  document.getElementById('add').addEventListener('click', () => {
+    if (state.settings.compact) { window.api.add(''); return; }
+    editing = 'new';
+    render();
+  });
+  collapseBtn.addEventListener('click', () => window.api.updateSettings({ collapsed: !state.settings.collapsed }));
+  bellBtn.addEventListener('click', () => window.api.toggleNotifs());
+  dndBtn.addEventListener('click', () => window.api.updateSettings({ dnd: !state.settings.dnd }));
+  gearBtn.addEventListener('click', () => window.api.openSettings('appearance'));
+
+  window.api.onState((s) => {
+    state = s;
+    // Rebuilding the list mid-drag or mid-typing would cancel it.
+    if (!editing && !dragId) render(); else applyTheme(s.theme);
+  });
+  window.api.onStartRename((id) => {
+    if (state.settings.compact) { window.api.openSettings('account', id); return; }
+    editing = id;
+    render();
+  });
+  window.api.getState().then((s) => { state = s; render(); });
+</script>
+</body>
+</html>
