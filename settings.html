@@ -76,11 +76,17 @@
   .avatar img { width: 100%; height: 100%; object-fit: cover; }
   #acctForm { flex: 1; min-width: 0; max-width: 520px; }
 
-  input[type=text], textarea {
+  input[type=text], input[type=password], select, textarea {
     width: 100%; padding: 8px 10px; background: var(--field); color: var(--text);
     border: 1px solid var(--line); border-radius: 8px; font: inherit;
   }
-  input[type=text]:focus, textarea:focus { border-color: var(--accent); outline: none; }
+  input[type=text]:focus, input[type=password]:focus, select:focus, textarea:focus { border-color: var(--accent); outline: none; }
+  select { width: auto; min-width: 180px; }
+  .row.fields > * { flex: 1; min-width: 120px; }
+  .row.fields > select { flex: none; min-width: 120px; }
+  #pPort { flex: none; width: 90px; min-width: 90px; }
+  .ok { color: #3ba55d; }
+  .bad { color: #f04747; }
   textarea { min-height: 150px; resize: vertical; font-family: ui-monospace, Consolas, "Cascadia Mono", monospace; font-size: 12.5px; }
   .btn {
     padding: 7px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--hover);
@@ -148,6 +154,9 @@
           <h2>Name</h2>
           <input type="text" id="aName" maxlength="24" spellcheck="false">
 
+          <h2>Group</h2>
+          <select id="aGroup" aria-label="Group"></select>
+
           <h2>Color</h2>
           <div class="row">
             <div id="aSwatches" class="swatches"></div>
@@ -173,6 +182,30 @@
             <span id="aZoomLabel">100%</span>
             <button class="btn" id="aZoomReset" type="button">Reset</button>
           </div>
+
+          <h2>Proxy or VPN</h2>
+          <div class="row fields">
+            <select id="pType" aria-label="Proxy type">
+              <option value="none">No proxy</option>
+              <option value="http">HTTP</option>
+              <option value="https">HTTPS</option>
+              <option value="socks5">SOCKS5</option>
+              <option value="socks4">SOCKS4</option>
+            </select>
+            <input type="text" id="pHost" placeholder="Host or IP address" spellcheck="false">
+            <input type="text" id="pPort" placeholder="Port" inputmode="numeric" spellcheck="false">
+          </div>
+          <div class="row fields" style="margin-top:8px">
+            <input type="text" id="pUser" placeholder="Username (optional)" spellcheck="false" autocomplete="off">
+            <input type="password" id="pPass" placeholder="Password" autocomplete="off">
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn primary" id="pSave" type="button">Save proxy</button>
+            <button class="btn" id="pTest" type="button">Test connection</button>
+            <button class="btn" id="pClearPw" type="button" hidden>Forget saved password</button>
+            <span class="note" id="pMsg" style="margin:0" role="status"></span>
+          </div>
+          <p class="note">Only this account uses the proxy, and saving reloads the account. Passwords are stored encrypted by Windows. SOCKS proxies can't use a username and password; use an HTTP proxy for that. Voice and video calls may not work through a proxy. A VPN app that covers the whole PC also works, but then every account shares it.</p>
 
           <h2>Custom CSS</h2>
           <textarea id="aCss" spellcheck="false" placeholder="/* Styles applied only to this account */
@@ -309,6 +342,30 @@ html { filter: saturate(0.85); }"></textarea>
     const a = state.accounts.find((x) => x.id === selId);
     if (!a) return;
     setVal($('aName'), a.name);
+
+    const gSel = $('aGroup');
+    const sig = (state.groups || []).map((g) => g.id + ':' + g.name).join('|');
+    if (gSel.dataset.sig !== sig) {
+      gSel.textContent = '';
+      gSel.append(new Option('No group', ''));
+      for (const g of state.groups || []) gSel.append(new Option(g.name, g.id));
+      gSel.dataset.sig = sig;
+    }
+    if (document.activeElement !== gSel) gSel.value = a.groupId || '';
+
+    // proxy fields: reset when switching accounts, keep what's being typed otherwise
+    if ($('pType').dataset.id !== a.id) {
+      $('pType').dataset.id = a.id;
+      $('pMsg').textContent = '';
+      $('pMsg').className = 'note';
+      $('pPass').value = '';
+      $('pType').value = a.proxy ? a.proxy.type : 'none';
+      $('pHost').value = a.proxy ? a.proxy.host : '';
+      $('pPort').value = a.proxy ? a.proxy.port : '';
+      $('pUser').value = a.proxy ? a.proxy.username : '';
+    }
+    $('pPass').placeholder = a.proxy && a.proxy.hasPassword ? 'Saved (leave blank to keep)' : 'Password';
+    $('pClearPw').hidden = !(a.proxy && a.proxy.hasPassword);
     swatchRow($('aSwatches'), a.color, (c) => window.api.updateAccount(a.id, { color: c }));
     setVal($('aColor'), a.color || '#5865f2');
     setVal($('aEmoji'), a.icon && a.icon.type === 'emoji' ? a.icon.value : '');
@@ -348,6 +405,31 @@ html { filter: saturate(0.85); }"></textarea>
     const r = await window.api.pickIcon(cur());
     if (r === 'error') $('iconMsg').textContent = "Couldn't read that image. Try a PNG or JPG.";
     else if (r === 'ok') $('iconMsg').textContent = 'Icon updated.';
+  });
+  $('aGroup').addEventListener('change', (e) => window.api.updateAccount(cur(), { groupId: e.target.value || null }));
+
+  function proxyMsg(r) {
+    $('pMsg').textContent = r.message;
+    $('pMsg').className = 'note ' + (r.ok ? 'ok' : 'bad');
+  }
+  function proxyForm(extra) {
+    return Object.assign({
+      type: $('pType').value, host: $('pHost').value, port: $('pPort').value,
+      username: $('pUser').value, password: $('pPass').value,
+    }, extra || {});
+  }
+  $('pSave').addEventListener('click', async () => {
+    const r = await window.api.setProxy(cur(), proxyForm());
+    if (r.ok) $('pPass').value = '';
+    proxyMsg(r);
+  });
+  $('pClearPw').addEventListener('click', async () => {
+    proxyMsg(await window.api.setProxy(cur(), proxyForm({ password: '', clearPassword: true })));
+  });
+  $('pTest').addEventListener('click', async () => {
+    $('pMsg').className = 'note';
+    $('pMsg').textContent = 'Testing...';
+    proxyMsg(await window.api.testProxy(cur()));
   });
   $('aMuteN').addEventListener('change', (e) => window.api.updateAccount(cur(), { muteNotifications: e.target.checked }));
   $('aMuteA').addEventListener('change', (e) => window.api.updateAccount(cur(), { muteAudio: e.target.checked }));

@@ -1,5 +1,5 @@
 const {
-  app, BaseWindow, BrowserWindow, WebContentsView, Menu, ipcMain, session, shell, dialog, nativeImage, screen,
+  app, BaseWindow, BrowserWindow, WebContentsView, Menu, ipcMain, session, shell, dialog, nativeImage, screen, safeStorage,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -11,6 +11,9 @@ const SIDEBAR_COMPACT = 72;
 const SIDEBAR_COLLAPSED = 22;
 const NOTIF_WIDTH = 380;
 const POP_BAR = 38;
+const DIVIDER_W = 8;
+const MIN_PANE = 320;
+const PROXY_TYPES = ['none', 'http', 'https', 'socks4', 'socks5'];
 const HEX = /^#[0-9a-f]{6}$/i;
 const ICON_PATH = path.join(__dirname, 'assets', 'icon.png');
 const ALLOWED_PERMISSIONS = [
@@ -40,17 +43,21 @@ const THEMES = {
 
 const DEFAULT_SETTINGS = {
   theme: 'midnight', accent: '#7d8cff', compact: false, collapsed: false,
-  hideMenuBar: false, dnd: false, updateUrl: '', autoUpdate: true,
+  hideMenuBar: false, dnd: false, updateUrl: '', autoUpdate: true, splitRatio: 0.5,
 };
 
 let win = null;
 let sidebar = null;
 let notifView = null;
 let settingsWin = null;
+let divider = null;
 let notifOpen = false;
 let quitting = false;
 let accounts = [];
+let groups = [];              // [{ id, name, collapsed }]
 let activeId = null;
+let splitId = null;           // account shown beside the active one
+let windowState = null;
 let notifications = [];
 let settings = { ...DEFAULT_SETTINGS };
 let updater = { status: 'idle', message: '' };
@@ -59,6 +66,7 @@ const badges = new Map();     // account id -> { mentions, unread }
 const cssKeys = new Map();
 const popouts = new Map();    // account id -> { win, bar, onTop, docked, layout }
 const notifRate = new Map();
+const proxyTries = new Map();
 
 // ---------- storage ----------
 const storePath = () => path.join(app.getPath('userData'), 'accounts.json');
@@ -78,7 +86,31 @@ function normalizeAccount(a) {
     muteAudio: !!a.muteAudio,
     zoom: Math.min(2, Math.max(0.5, Number(a.zoom) || 1)),
     css: String(a.css || '').slice(0, 20000),
+    groupId: a.groupId ? String(a.groupId) : null,
+    proxy: normalizeProxy(a.proxy),
   };
+}
+
+function normalizeProxy(p) {
+  if (!p || !PROXY_TYPES.includes(p.type) || p.type === 'none') return null;
+  const host = String(p.host || '').trim();
+  const port = parseInt(p.port, 10);
+  if (!/^[A-Za-z0-9._\-\[\]:]{1,253}$/.test(host) || !(port >= 1 && port <= 65535)) return null;
+  return {
+    type: p.type,
+    host,
+    port,
+    username: String(p.username || '').slice(0, 128),
+    passwordEnc: p.passwordEnc ? String(p.passwordEnc) : '',
+  };
+}
+
+function encryptPw(pw) {
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  return safeStorage.encryptString(pw).toString('base64');
+}
+function decryptPw(enc) {
+  try { return safeStorage.decryptString(Buffer.from(enc, 'base64')); } catch { return ''; }
 }
 
 function cleanUrl(u) {
@@ -92,6 +124,16 @@ function loadStore() {
     if (Array.isArray(data.accounts)) accounts = data.accounts.map(normalizeAccount);
     activeId = data.activeId;
     settings = { ...DEFAULT_SETTINGS, ...(data.settings || {}) };
+    if (Array.isArray(data.groups)) {
+      groups = data.groups.filter((g) => g && g.id).map((g) => ({
+        id: String(g.id), name: String(g.name || 'Group').slice(0, 24), collapsed: !!g.collapsed,
+      }));
+    }
+    splitId = data.splitId ? String(data.splitId) : null;
+    const w = data.windowState;
+    if (w && [w.width, w.height].every((n) => Number.isFinite(n))) {
+      windowState = { x: w.x, y: w.y, width: w.width, height: w.height, maximized: !!w.maximized };
+    }
   } catch {
     accounts = [];
   }
@@ -100,6 +142,9 @@ function loadStore() {
   settings.updateUrl = cleanUrl(settings.updateUrl);
   if (!accounts.length) accounts = [normalizeAccount({ id: crypto.randomUUID(), name: 'Account 1' })];
   if (!accounts.some((a) => a.id === activeId)) activeId = accounts[0].id;
+  if (!accounts.some((a) => a.id === splitId) || splitId === activeId) splitId = null;
+  accounts.forEach((a) => { if (a.groupId && !groups.some((g) => g.id === a.groupId)) a.groupId = null; });
+  settings.splitRatio = Math.min(0.85, Math.max(0.15, Number(settings.splitRatio) || 0.5));
   try {
     const n = JSON.parse(fs.readFileSync(notifPath(), 'utf8'));
     if (Array.isArray(n)) {
@@ -112,7 +157,7 @@ function loadStore() {
 }
 
 function saveStore() {
-  fs.writeFileSync(storePath(), JSON.stringify({ accounts, activeId, settings }, null, 2));
+  fs.writeFileSync(storePath(), JSON.stringify({ accounts, groups, activeId, splitId, settings, windowState }, null, 2));
 }
 
 let notifTimer = null;
@@ -133,6 +178,8 @@ function getState() {
   const live = notifications.filter((n) => acct(n.accountId));
   return {
     activeId,
+    splitId,
+    groups,
     settings,
     updater: { ...updater, version: app.getVersion(), packaged: app.isPackaged },
     notifOpen,
@@ -140,8 +187,9 @@ function getState() {
     unreadNotifs: live.filter((n) => !n.read).length,
     theme: { id: settings.theme, scheme: t.scheme, vars: { ...t.vars, '--accent': settings.accent } },
     themes: Object.entries(THEMES).map(([id, th]) => ({ id, label: th.label, scheme: th.scheme, accent: th.accent, vars: th.vars })),
-    accounts: accounts.map((a) => ({
+    accounts: accounts.map(({ proxy, ...a }) => ({
       ...a,
+      proxy: proxy ? { type: proxy.type, host: proxy.host, port: proxy.port, username: proxy.username, hasPassword: !!proxy.passwordEnc } : null,
       popped: popouts.has(a.id),
       onTop: !!popouts.get(a.id)?.onTop,
       mentions: badges.get(a.id)?.mentions || 0,
@@ -152,7 +200,7 @@ function getState() {
 
 function pushState() {
   const s = getState();
-  const targets = [sidebar, settingsWin, notifView, ...[...popouts.values()].map((p) => p.bar)];
+  const targets = [sidebar, settingsWin, notifView, divider, ...[...popouts.values()].map((p) => p.bar)];
   for (const w of targets) {
     if (w && !w.webContents.isDestroyed()) w.webContents.send('state', s);
   }
@@ -216,6 +264,7 @@ function updateAccount(id, patch) {
   if ('muteAudio' in patch) a.muteAudio = !!patch.muteAudio;
   if ('zoom' in patch) a.zoom = Math.min(2, Math.max(0.5, Number(patch.zoom) || 1));
   if ('css' in patch) a.css = String(patch.css || '').slice(0, 20000);
+  if ('groupId' in patch) a.groupId = groups.some((g) => g.id === patch.groupId) ? patch.groupId : null;
   applyAccount(id, { css: 'css' in patch });
   changed();
 }
@@ -249,18 +298,169 @@ function applyWindowSettings() {
 }
 
 // ---------- layout ----------
+function splitShown(areaWidth) {
+  if (!win || !splitId || splitId === activeId || !views.has(splitId) || popouts.has(splitId)) return false;
+  const a = areaWidth ?? Math.max(0, win.getContentBounds().width - sidebarWidth());
+  return a >= 2 * MIN_PANE + DIVIDER_W;
+}
+
 function layout() {
   if (!win) return;
   const { width, height } = win.getContentBounds();
   const sw = sidebarWidth();
+  const area = Math.max(0, width - sw);
   sidebar.setBounds({ x: 0, y: 0, width: sw, height });
-  for (const [id, v] of views) {
-    if (!popouts.has(id)) v.setBounds({ x: sw, y: 0, width: Math.max(0, width - sw), height });
+
+  const showSplit = splitShown(area);
+  let leftW = area;
+  if (showSplit) {
+    leftW = Math.round((area - DIVIDER_W) * settings.splitRatio);
+    leftW = Math.min(area - DIVIDER_W - MIN_PANE, Math.max(MIN_PANE, leftW));
   }
-  notifView.setBounds({ x: sw, y: 0, width: Math.min(NOTIF_WIDTH, Math.max(0, width - sw)), height });
+  for (const [id, v] of views) {
+    if (popouts.has(id)) continue;
+    if (showSplit && id === splitId) {
+      v.setBounds({ x: sw + leftW + DIVIDER_W, y: 0, width: area - leftW - DIVIDER_W, height });
+      v.setVisible(true);
+    } else {
+      v.setBounds({ x: sw, y: 0, width: showSplit ? leftW : area, height });
+      v.setVisible(id === activeId);
+    }
+  }
+  divider.setVisible(showSplit);
+  if (showSplit) divider.setBounds({ x: sw + leftW, y: 0, width: DIVIDER_W, height });
+  notifView.setBounds({ x: sw, y: 0, width: Math.min(NOTIF_WIDTH, area), height });
+}
+
+function openSplit(id) {
+  if (!views.has(id) || id === activeId) return;
+  if (popouts.has(id)) { focusWindow(popouts.get(id).win); return; }
+  splitId = id;
+  layout();
+  changed();
+  if (!splitShown()) {
+    dialog.showMessageBox(win, {
+      type: 'info',
+      message: 'Make the window wider to see split view.',
+      detail: 'Each side needs about 320 pixels. It will appear as soon as there is room.',
+    });
+  }
+}
+
+function closeSplit() {
+  if (!splitId) return;
+  splitId = null;
+  layout();
+  changed();
+}
+
+function swapSplit() {
+  if (!splitId || !splitShown()) return;
+  [activeId, splitId] = [splitId, activeId];
+  layout();
+  changed();
 }
 
 const firstDocked = (exceptId) => accounts.find((a) => !popouts.has(a.id) && a.id !== exceptId);
+
+// ---------- proxy ----------
+const hostForUrl = (h) => (h.includes(':') && !h.startsWith('[') ? `[${h}]` : h);
+
+async function applyProxy(id, { reload = false } = {}) {
+  const a = acct(id);
+  const wc = views.get(id)?.webContents;
+  if (!a || !wc || wc.isDestroyed()) return;
+  const ses = wc.session;
+  try {
+    if (a.proxy) {
+      await ses.setProxy({
+        proxyRules: `${a.proxy.type}://${hostForUrl(a.proxy.host)}:${a.proxy.port}`,
+        proxyBypassRules: '<local>',
+      });
+      // Keeps calls from sending your real address around the proxy.
+      wc.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+    } else {
+      await ses.setProxy({ mode: 'system' });
+      wc.setWebRTCIPHandlingPolicy('default');
+    }
+    if (reload) {
+      await ses.closeAllConnections();
+      wc.reload();
+    }
+  } catch { /* ignore */ }
+}
+
+app.on('login', (event, wc, _request, authInfo, callback) => {
+  if (!authInfo.isProxy) return;
+  let a = null;
+  if (wc) for (const [id, v] of views) if (v.webContents.id === wc.id) a = acct(id);
+  if (!a) {
+    a = accounts.find((x) => x.proxy && x.proxy.username && x.proxy.host === authInfo.host && x.proxy.port === authInfo.port);
+  }
+  if (!a || !a.proxy || !a.proxy.username) return;
+  event.preventDefault();
+  // Stop after a few tries so a wrong password can't loop forever.
+  const now = Date.now();
+  const tries = (proxyTries.get(a.id) || []).filter((t) => now - t < 30000);
+  tries.push(now);
+  proxyTries.set(a.id, tries);
+  if (tries.length > 3) { callback(); return; }
+  callback(a.proxy.username, decryptPw(a.proxy.passwordEnc));
+});
+
+// ---------- groups ----------
+const group = (id) => groups.find((g) => g.id === id);
+
+function createGroup(name, accountId) {
+  const g = {
+    id: crypto.randomUUID(),
+    name: String(name || '').trim().slice(0, 24) || `Group ${groups.length + 1}`,
+    collapsed: false,
+  };
+  groups.push(g);
+  const a = acct(accountId);
+  if (a) a.groupId = g.id;
+  changed();
+}
+
+function setGroup(accountId, groupId) {
+  const a = acct(accountId);
+  if (!a) return;
+  a.groupId = group(groupId) ? groupId : null;
+  accounts = accounts.filter((x) => x !== a);
+  accounts.push(a); // lands at the end of its new group
+  changed();
+}
+
+// ---------- window size and position ----------
+let wsTimer = null;
+function saveWindowStateNow() {
+  if (!win || win.isDestroyed()) return;
+  const b = win.getNormalBounds();
+  windowState = { x: b.x, y: b.y, width: b.width, height: b.height, maximized: win.isMaximized() };
+  saveStore();
+}
+function scheduleWindowState() {
+  clearTimeout(wsTimer);
+  wsTimer = setTimeout(saveWindowStateNow, 600);
+}
+function initialBounds() {
+  const out = { width: 1300, height: 850 };
+  const ws = windowState;
+  if (!ws) return out;
+  out.width = Math.max(900, Math.min(ws.width, 10000));
+  out.height = Math.max(600, Math.min(ws.height, 10000));
+  if (Number.isFinite(ws.x) && Number.isFinite(ws.y)) {
+    const onScreen = screen.getAllDisplays().some((d) => {
+      const wa = d.workArea;
+      const ix = Math.min(ws.x + out.width, wa.x + wa.width) - Math.max(ws.x, wa.x);
+      const iy = Math.min(ws.y + out.height, wa.y + wa.height) - Math.max(ws.y, wa.y);
+      return ix >= 200 && iy >= 100;
+    });
+    if (onScreen) { out.x = ws.x; out.y = ws.y; }
+  }
+  return out;
+}
 
 // ---------- account views ----------
 function createView(a) {
@@ -305,7 +505,7 @@ function createView(a) {
   win.contentView.addChildView(view);
   views.set(a.id, view);
   view.webContents.setAudioMuted(a.muteAudio);
-  view.webContents.loadURL(DISCORD_URL);
+  applyProxy(a.id).finally(() => view.webContents.loadURL(DISCORD_URL));
   return view;
 }
 
@@ -335,13 +535,17 @@ function activate(id) {
   if (!views.has(id)) return;
   if (popouts.has(id)) { focusWindow(popouts.get(id).win); return; }
   if (notifOpen) { notifOpen = false; notifView.setVisible(false); }
+  if (id === splitId) splitId = activeId; // it is already on screen: swap sides
   activeId = id;
-  for (const [vid, v] of views) {
-    if (!popouts.has(vid)) v.setVisible(vid === id);
-  }
   layout();
   views.get(id).webContents.focus();
   changed();
+}
+
+function dockAny() {
+  const first = [...popouts.keys()][0];
+  if (first) dockInternal(first, { activate: false });
+  return first;
 }
 
 async function removeAccount(id) {
@@ -382,8 +586,16 @@ async function removeAccount(id) {
   accounts = accounts.filter((x) => x.id !== id);
   notifications = notifications.filter((n) => n.accountId !== id);
   saveNotifs();
-  if (activeId === id) activate(firstDocked().id);
-  else changed();
+  if (splitId === id) splitId = null;
+  if (activeId === id) {
+    const next = splitId || firstDocked(id)?.id || dockAny();
+    if (next === splitId) splitId = null;
+    activeId = next;
+    layout();
+    views.get(next)?.webContents.focus();
+  }
+  layout();
+  changed();
 }
 
 // ---------- pop-out windows ----------
@@ -441,10 +653,11 @@ function popOut(id, at) {
   p.layout();
   setTimeout(p.layout, 80);
 
+  if (splitId === id) splitId = null;
   if (activeId === id) {
-    const next = firstDocked(id);
-    activeId = next.id;
-    for (const [vid, v] of views) if (!popouts.has(vid)) v.setVisible(vid === activeId);
+    const next = splitId || firstDocked(id).id;
+    if (next === splitId) splitId = null;
+    activeId = next;
   }
   layout();
   changed();
@@ -591,6 +804,7 @@ function openSettings(tab, accountId) {
 // ---------- menu / shortcuts ----------
 function currentId() {
   for (const [id, p] of popouts) if (!p.win.isDestroyed() && p.win.isFocused()) return id;
+  if (splitId && views.get(splitId)?.webContents.isFocused()) return splitId;
   return activeId;
 }
 
@@ -615,6 +829,14 @@ function buildMenu() {
           accelerator: `CmdOrCtrl+${i + 1}`,
           click: () => activate(a.id),
         })),
+        {
+          label: 'Show beside current account',
+          submenu: accounts
+            .filter((a) => a.id !== activeId && !popouts.has(a.id))
+            .map((a) => ({ label: a.name, click: () => openSplit(a.id) })),
+          enabled: accounts.some((a) => a.id !== activeId && !popouts.has(a.id)),
+        },
+        { label: 'Close split view', enabled: !!splitId, click: closeSplit },
         { type: 'separator' },
         { label: 'Notification center', accelerator: 'CmdOrCtrl+Shift+N', click: () => setNotifOpen(!notifOpen) },
         { label: 'Collapse or expand sidebar', accelerator: 'CmdOrCtrl+B', click: () => updateSettings({ collapsed: !settings.collapsed }) },
@@ -679,6 +901,7 @@ ipcMain.on('reorder', (_e, fromId, toId, after) => {
   const to = accounts.findIndex((a) => a.id === toId);
   if (to < 0) { accounts.splice(from, 0, item); return; }
   accounts.splice(after ? to + 1 : to, 0, item);
+  item.groupId = accounts.find((a) => a.id === toId)?.groupId || null;
   changed();
 });
 
@@ -741,6 +964,114 @@ ipcMain.on('pop-dock', (e) => {
   if (p) p.win.close();
 });
 
+ipcMain.on('split-open', (_e, id) => openSplit(id));
+ipcMain.on('split-drag', (_e, screenX) => {
+  if (!win || !splitShown()) return;
+  const b = win.getContentBounds();
+  const sw = sidebarWidth();
+  const area = b.width - sw;
+  const ratio = (Number(screenX) - b.x - sw - DIVIDER_W / 2) / (area - DIVIDER_W);
+  if (!Number.isFinite(ratio)) return;
+  settings.splitRatio = Math.min(0.85, Math.max(0.15, ratio));
+  layout();
+});
+ipcMain.on('split-drag-end', () => changed());
+ipcMain.on('split-reset', () => { settings.splitRatio = 0.5; layout(); changed(); });
+ipcMain.on('split-menu', () => {
+  Menu.buildFromTemplate([
+    { label: 'Equal width', click: () => { settings.splitRatio = 0.5; layout(); changed(); } },
+    { label: 'Swap sides', click: swapSplit },
+    { type: 'separator' },
+    { label: 'Close split view', click: closeSplit },
+  ]).popup({ window: win });
+});
+
+ipcMain.on('group-add', (_e, name, accountId) => createGroup(name, accountId));
+ipcMain.on('set-group', (_e, accountId, groupId) => setGroup(accountId, groupId));
+ipcMain.on('group-update', (_e, id, patch) => {
+  const g = group(id);
+  if (!g || !patch || typeof patch !== 'object') return;
+  if ('name' in patch) {
+    const n = String(patch.name || '').trim().slice(0, 24);
+    if (n) g.name = n;
+  }
+  if ('collapsed' in patch) g.collapsed = !!patch.collapsed;
+  changed();
+});
+ipcMain.on('group-menu', (_e, id) => {
+  const g = group(id);
+  if (!g) return;
+  const i = groups.indexOf(g);
+  const move = (d) => { groups.splice(i, 1); groups.splice(i + d, 0, g); changed(); };
+  Menu.buildFromTemplate([
+    {
+      label: 'Rename',
+      enabled: !settings.compact && !settings.collapsed,
+      click: () => sidebar.webContents.send('start-group-rename', id),
+    },
+    { label: g.collapsed ? 'Expand' : 'Collapse', click: () => { g.collapsed = !g.collapsed; changed(); } },
+    { label: 'Move up', enabled: i > 0, click: () => move(-1) },
+    { label: 'Move down', enabled: i < groups.length - 1, click: () => move(1) },
+    { type: 'separator' },
+    {
+      label: 'Delete group',
+      click: () => {
+        accounts.forEach((a) => { if (a.groupId === id) a.groupId = null; });
+        groups = groups.filter((x) => x.id !== id);
+        changed();
+      },
+    },
+  ]).popup({ window: win });
+});
+
+ipcMain.handle('set-proxy', async (_e, id, data) => {
+  const a = acct(id);
+  if (!a) return { ok: false, message: 'Account not found.' };
+  if (!data || data.type === 'none') {
+    a.proxy = null;
+    await applyProxy(id, { reload: true });
+    changed();
+    return { ok: true, message: 'Proxy turned off. The account is reloading.' };
+  }
+  const type = PROXY_TYPES.includes(data.type) ? data.type : 'http';
+  const host = String(data.host || '').trim();
+  const port = parseInt(data.port, 10);
+  const username = String(data.username || '').trim().slice(0, 128);
+  if (!/^[A-Za-z0-9._\-\[\]:]{1,253}$/.test(host) || !(port >= 1 && port <= 65535)) {
+    return { ok: false, message: 'Enter a valid host and a port from 1 to 65535.' };
+  }
+  if ((type === 'socks4' || type === 'socks5') && username) {
+    return { ok: false, message: "SOCKS proxies can't use a username and password here. Use an HTTP proxy, or a VPN app." };
+  }
+  let passwordEnc = a.proxy ? a.proxy.passwordEnc : '';
+  if (data.clearPassword) passwordEnc = '';
+  if (data.password) {
+    const enc = encryptPw(String(data.password).slice(0, 256));
+    if (!enc) return { ok: false, message: "This computer can't store a password securely, so it wasn't saved." };
+    passwordEnc = enc;
+  }
+  if (!username) passwordEnc = '';
+  a.proxy = { type, host, port, username, passwordEnc };
+  await applyProxy(id, { reload: true });
+  changed();
+  return { ok: true, message: 'Proxy saved. The account is reloading.' };
+});
+
+ipcMain.handle('test-proxy', async (_e, id) => {
+  const wc = views.get(id)?.webContents;
+  if (!wc) return { ok: false, message: 'Account not found.' };
+  const t0 = Date.now();
+  try {
+    const r = await wc.session.fetch('https://discord.com/api/v9/gateway', { signal: AbortSignal.timeout(10000) });
+    const how = acct(id)?.proxy ? 'through the proxy' : 'directly (no proxy set)';
+    return r.ok
+      ? { ok: true, message: `Reached Discord ${how} in ${Date.now() - t0} ms.` }
+      : { ok: false, message: `Discord answered with status ${r.status}.` };
+  } catch (e) {
+    return { ok: false, message: `Couldn't connect: ${String((e && e.message) || e).slice(0, 120)}` };
+  }
+});
+
 ipcMain.handle('pick-icon', async (_e, id) => {
   const a = acct(id);
   if (!a) return 'error';
@@ -775,6 +1106,23 @@ ipcMain.on('menu', (_e, id) => {
       checked: a.muteNotifications,
       click: () => updateAccount(id, { muteNotifications: !a.muteNotifications }),
     },
+    {
+      label: 'Move to group',
+      submenu: [
+        { label: 'No group', type: 'radio', checked: !a.groupId, click: () => setGroup(id, null) },
+        ...groups.map((g) => ({ label: g.name, type: 'radio', checked: a.groupId === g.id, click: () => setGroup(id, g.id) })),
+        { type: 'separator' },
+        {
+          label: 'New group…',
+          click: () => (settings.compact || settings.collapsed
+            ? createGroup('', id)
+            : sidebar.webContents.send('start-new-group', id)),
+        },
+      ],
+    },
+    ...(splitId === id
+      ? [{ label: 'Close split view', click: closeSplit }]
+      : (id !== activeId && !p ? [{ label: 'Show beside current account', click: () => openSplit(id) }] : [])),
     { type: 'separator' },
     ...(p
       ? [
@@ -807,8 +1155,7 @@ if (!app.requestSingleInstanceLock()) {
     loadStore();
 
     win = new BaseWindow({
-      width: 1300,
-      height: 850,
+      ...initialBounds(),
       minWidth: 900,
       minHeight: 600,
       title: 'Multi Discord',
@@ -838,10 +1185,27 @@ if (!app.requestSingleInstanceLock()) {
     notifView.webContents.loadFile(path.join(__dirname, 'notifications.html'));
     notifView.setVisible(false);
 
-    accounts.forEach(createView);
-    win.contentView.addChildView(notifView);
+    divider = new WebContentsView({
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        sandbox: true,
+      },
+    });
+    divider.webContents.on('will-navigate', (e) => e.preventDefault());
+    divider.webContents.loadFile(path.join(__dirname, 'divider.html'));
+    divider.setVisible(false);
 
-    win.on('resize', layout);
+    accounts.forEach(createView);
+    win.contentView.addChildView(divider);
+    win.contentView.addChildView(notifView);
+    if (windowState && windowState.maximized) win.maximize();
+
+    win.on('resize', () => { layout(); scheduleWindowState(); });
+    win.on('move', scheduleWindowState);
+    win.on('maximize', scheduleWindowState);
+    win.on('unmaximize', scheduleWindowState);
+    win.on('close', saveWindowStateNow);
     win.on('enter-full-screen', layout);
     win.on('leave-full-screen', layout);
     win.on('closed', () => {

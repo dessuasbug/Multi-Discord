@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Divider</title>
+<style>
+  :root { --bg: #17181c; --bg-deep: #121317; --line: #3a3e4b; --accent: #7d8cff; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body {
+    display: grid; place-items: center; background: var(--bg-deep); cursor: col-resize;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  .grip { width: 2px; height: 40px; border-radius: 1px; background: var(--line); }
+  body:hover .grip, body.drag .grip { background: var(--accent); }
+  body:hover, body.drag { background: color-mix(in srgb, var(--accent) 14%, var(--bg-deep)); }
+</style>
+</head>
+<body title="Drag to resize. Double-click for equal widths. Right-click for more.">
+  <div class="grip"></div>
+<script>
+  function applyTheme(t) {
+    const root = document.documentElement.style;
+    for (const [k, v] of Object.entries(t.vars)) root.setProperty(k, v);
+    root.colorScheme = t.scheme;
+  }
+  let dragging = false;
+  let raf = 0;
+  let lastX = 0;
+  const end = () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove('drag');
+    window.api.splitDragEnd();
+  };
+  document.body.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    dragging = true;
+    document.body.classList.add('drag');
+    document.body.setPointerCapture(e.pointerId);
+    lastX = e.screenX;
+  });
+  document.body.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    lastX = e.screenX;
+    if (!raf) raf = requestAnimationFrame(() => { raf = 0; window.api.splitDrag(lastX); });
+  });
+  document.body.addEventListener('pointerup', end);
+  document.body.addEventListener('pointercancel', end);
+  document.body.addEventListener('lostpointercapture', end);
+  document.body.addEventListener('dblclick', () => window.api.splitReset());
+  document.body.addEventListener('contextmenu', (e) => { e.preventDefault(); window.api.splitMenu(); });
+
+  window.api.onState((s) => applyTheme(s.theme));
+  window.api.getState().then((s) => applyTheme(s.theme));
+</script>
+</body>
+</html>

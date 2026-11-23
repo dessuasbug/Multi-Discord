@@ -25,7 +25,20 @@
     display: grid; place-items: center; background: transparent; color: var(--muted); cursor: pointer;
   }
   .icon-btn:hover, .icon-btn:focus-visible { background: var(--hover); color: var(--text); outline: none; }
+  .head-btns { display: flex; gap: 2px; }
   ul { list-style: none; margin: 0; padding: 0 8px; overflow-y: auto; flex: 1; }
+  ul.drop-ungroup { box-shadow: inset 0 -3px 0 var(--accent); }
+  li.group {
+    height: 30px; gap: 6px; padding: 0 8px 0 4px; margin: 8px 0 2px; color: var(--muted);
+    font-size: 12.5px; font-weight: 600;
+  }
+  li.group.drop-into { background: color-mix(in srgb, var(--accent) 22%, var(--bg)); color: var(--text); }
+  li.group.has-active { color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
+  li.group .chev { flex: none; display: grid; transition: transform .12s; }
+  li.group.collapsed .chev { transform: rotate(-90deg); }
+  li.group .gcount { flex: none; font-weight: 500; opacity: .75; }
+  li.in-group { margin-left: 12px; }
+  li.split { box-shadow: inset 3px 0 0 var(--muted); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); }
   li {
     position: relative; display: flex; align-items: center; gap: 10px;
     height: 48px; padding: 0 8px 0 10px; margin-bottom: 2px;
@@ -86,17 +99,20 @@
   p.hint { margin: 10px 8px 0; font-size: 12px; color: var(--muted); }
   .strip-dot { display: none; position: absolute; top: 6px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--alert); }
 
+  body.compact li.group .gname, body.compact li.group .gcount, body.compact #newGroup,
   body.compact h1, body.compact .name, body.compact .edit, body.compact .tag,
   body.compact p.hint, body.compact .add .label { display: none !important; }
   body.compact .head { justify-content: center; padding: 14px 0 8px; }
   body.compact ul { padding: 8px 6px 0; }
   body.compact li { justify-content: center; padding: 0; height: 52px; }
+  body.compact li.group { height: 22px; margin: 6px 0 2px; }
+  body.compact li.in-group { margin-left: 0; }
   body.compact .badge { position: absolute; top: 2px; right: 4px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; }
   body.compact .dot { position: absolute; top: 8px; right: 10px; }
   body.compact .add .plus { display: inline; }
   body.compact .tools { flex-direction: column; }
 
-  body.collapsed h1, body.collapsed ul, body.collapsed footer { display: none; }
+  body.collapsed h1, body.collapsed ul, body.collapsed footer, body.collapsed #newGroup { display: none; }
   body.collapsed .head { padding: 10px 0; justify-content: center; }
   body.collapsed .icon-btn { width: 20px; height: 44px; border-radius: 4px; }
   body.collapsed.alert .strip-dot { display: block; }
@@ -105,7 +121,10 @@
 <body>
   <div class="head">
     <h1>Accounts</h1>
-    <button id="collapse" class="icon-btn" aria-label="Collapse sidebar"></button>
+    <div class="head-btns">
+      <button id="newGroup" class="icon-btn" title="New group" aria-label="New group"></button>
+      <button id="collapse" class="icon-btn" aria-label="Collapse sidebar"></button>
+    </div>
     <span class="strip-dot"></span>
   </div>
   <ul id="list"></ul>
@@ -116,7 +135,7 @@
       <button id="dnd" class="tool" aria-label="Do Not Disturb"></button>
       <button id="gear" class="tool" title="Settings" aria-label="Settings"></button>
     </div>
-    <p class="hint">Right-click an account for more options. Drag one out of the window to pop it out.</p>
+    <p class="hint">Right-click an account for options. Ctrl+click opens it beside the current one.</p>
   </footer>
 
 <script>
@@ -129,12 +148,19 @@
     bell: svg('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>', 18),
     bellOff: svg('<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>', 14),
     external: svg('<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>', 14),
+    folder: svg('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>', 14),
+    folderPlus: svg('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M12 10v6"/><path d="M9 13h6"/>', 16),
+    chevDown: svg('<path d="m6 9 6 6 6-6"/>', 14),
+    columns: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18"/>', 14),
+    globe: svg('<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>', 14),
     chevL: svg('<path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/>', 16),
     chevR: svg('<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>', 16),
   };
 
   let state = { accounts: [], activeId: null, settings: {}, theme: null, unreadNotifs: 0, notifOpen: false };
-  let editing = null; // an account id (rename) or 'new' (add)
+  let editing = null; // an account id (rename), 'new' (add account) or 'newgroup'
+  let editingGroup = null; // a group id being renamed
+  let pendingGroupAccount = null; // account to put in the group being created
   let dragId = null;
   const list = document.getElementById('list');
   const bellBtn = document.getElementById('bell');
@@ -142,6 +168,8 @@
   const gearBtn = document.getElementById('gear');
   const collapseBtn = document.getElementById('collapse');
   dndBtn.innerHTML = ICON.moon;
+  const newGroupBtn = document.getElementById('newGroup');
+  newGroupBtn.innerHTML = ICON.folderPlus;
   gearBtn.innerHTML = ICON.gear;
 
   function applyTheme(t) {
@@ -204,7 +232,7 @@
   }
 
   function clearDropMarks() {
-    document.querySelectorAll('.drop-before,.drop-after').forEach((el) => el.classList.remove('drop-before', 'drop-after'));
+    document.querySelectorAll('.drop-before,.drop-after,.drop-into,.drop-ungroup').forEach((el) => el.classList.remove('drop-before', 'drop-after', 'drop-into', 'drop-ungroup'));
   }
 
   function render() {
@@ -230,97 +258,13 @@
     bellBtn.title = 'Notification center (Ctrl+Shift+N)';
 
     list.textContent = '';
-    for (const a of state.accounts) {
-      const li = document.createElement('li');
-      li.tabIndex = 0;
-      li.title = a.popped ? `${a.name} (in its own window)` : a.name;
-      li.draggable = editing !== a.id;
-      if (a.id === state.activeId && !a.popped) li.className = 'active';
-      li.append(makeAvatar(a));
-
-      if (editing === a.id && !compact) {
-        li.append(makeInput(a.name, (v) => {
-          editing = null;
-          if (v) window.api.updateAccount(a.id, { name: v }); else render();
-        }));
-      } else {
-        const name = document.createElement('span');
-        name.className = 'name';
-        name.textContent = a.name;
-        li.append(name);
-      }
-
-      if (a.popped) {
-        const p = document.createElement('span');
-        p.className = 'tag';
-        p.title = 'Open in its own window';
-        p.innerHTML = ICON.external;
-        li.append(p);
-      }
-      if (a.muteNotifications) {
-        const m = document.createElement('span');
-        m.className = 'tag';
-        m.title = 'Notifications muted';
-        m.innerHTML = ICON.bellOff;
-        li.append(m);
-      }
-      if (a.mentions > 0) {
-        const b = document.createElement('span');
-        b.className = 'badge';
-        b.textContent = a.mentions > 99 ? '99+' : a.mentions;
-        li.append(b);
-      } else if (a.unread) {
-        const d = document.createElement('span');
-        d.className = 'dot';
-        li.append(d);
-      }
-
-      if (editing !== a.id) {
-        const edit = document.createElement('button');
-        edit.className = 'edit';
-        edit.title = 'Rename';
-        edit.setAttribute('aria-label', `Rename ${a.name}`);
-        edit.innerHTML = ICON.pencil;
-        edit.addEventListener('click', (e) => { e.stopPropagation(); editing = a.id; render(); });
-        li.append(edit);
-      }
-
-      li.addEventListener('click', () => window.api.switchTo(a.id));
-      li.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === li) window.api.switchTo(a.id); });
-      li.addEventListener('dblclick', () => { editing = a.id; render(); });
-      li.addEventListener('contextmenu', (e) => { e.preventDefault(); window.api.menu(a.id); });
-
-      li.addEventListener('dragstart', (e) => {
-        dragId = a.id;
-        e.dataTransfer.setData('text/plain', a.id);
-        e.dataTransfer.effectAllowed = 'move';
-      });
-      li.addEventListener('dragover', (e) => {
-        if (!dragId || dragId === a.id) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        const r = li.getBoundingClientRect();
-        const after = e.clientY > r.top + r.height / 2;
-        li.classList.toggle('drop-before', !after);
-        li.classList.toggle('drop-after', after);
-      });
-      li.addEventListener('dragleave', () => li.classList.remove('drop-before', 'drop-after'));
-      li.addEventListener('drop', (e) => {
-        e.preventDefault();
-        const r = li.getBoundingClientRect();
-        const after = e.clientY > r.top + r.height / 2;
-        clearDropMarks();
-        if (dragId && dragId !== a.id) window.api.reorder(dragId, a.id, after);
-      });
-      li.addEventListener('dragend', (e) => {
-        const id = dragId;
-        dragId = null;
-        clearDropMarks();
-        // Not dropped on another account: if the cursor left the window, pop the account out.
-        if (e.dataTransfer.dropEffect === 'none') window.api.dragEnd(id);
-        render();
-      });
-      list.append(li);
+    const groups = state.groups || [];
+    const gids = new Set(groups.map((g) => g.id));
+    for (const a of state.accounts.filter((x) => !x.groupId || !gids.has(x.groupId))) list.append(accountRow(a, false));
+    for (const g of groups) {
+      const members = state.accounts.filter((x) => x.groupId === g.id);
+      list.append(groupRow(g, members));
+      if (!g.collapsed) for (const a of members) list.append(accountRow(a, true));
     }
 
     if (editing === 'new' && !compact) {
@@ -335,12 +279,202 @@
       }));
       list.append(li);
     }
+    if (editing === 'newgroup' && !compact) {
+      const li = document.createElement('li');
+      li.className = 'group';
+      const ico = document.createElement('span');
+      ico.className = 'chev';
+      ico.innerHTML = ICON.folder;
+      li.append(ico, makeInput('', (v) => {
+        const acc = pendingGroupAccount;
+        editing = null;
+        pendingGroupAccount = null;
+        if (v !== null) window.api.groupAdd(v, acc); else render();
+      }));
+      list.append(li);
+    }
+  }
+
+  function groupRow(g, members) {
+    const compact = !!state.settings.compact;
+    const li = document.createElement('li');
+    li.className = 'group' + (g.collapsed ? ' collapsed' : '');
+    li.tabIndex = 0;
+    li.title = g.name;
+    if (g.collapsed && members.some((m) => m.id === state.activeId)) li.classList.add('has-active');
+
+    const chev = document.createElement('span');
+    chev.className = 'chev';
+    chev.innerHTML = ICON.chevDown;
+    li.append(chev);
+
+    if (editingGroup === g.id && !compact) {
+      li.append(makeInput(g.name, (v) => {
+        editingGroup = null;
+        if (v) window.api.groupUpdate(g.id, { name: v }); else render();
+      }));
+    } else {
+      const name = document.createElement('span');
+      name.className = 'name gname';
+      name.textContent = g.name;
+      li.append(name);
+      const count = document.createElement('span');
+      count.className = 'gcount';
+      count.textContent = members.length;
+      li.append(count);
+    }
+
+    if (g.collapsed) {
+      const total = members.reduce((n, m) => n + m.mentions, 0);
+      if (total > 0) {
+        const b = document.createElement('span');
+        b.className = 'badge';
+        b.textContent = total > 99 ? '99+' : total;
+        li.append(b);
+      } else if (members.some((m) => m.unread)) {
+        const d = document.createElement('span');
+        d.className = 'dot';
+        li.append(d);
+      }
+    }
+
+    const toggle = () => window.api.groupUpdate(g.id, { collapsed: !g.collapsed });
+    li.addEventListener('click', toggle);
+    li.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === li) { e.preventDefault(); toggle(); } });
+    li.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      if (!compact) { editingGroup = g.id; render(); }
+    });
+    li.addEventListener('contextmenu', (e) => { e.preventDefault(); window.api.groupMenu(g.id); });
+    li.addEventListener('dragover', (e) => {
+      if (!dragId) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      li.classList.add('drop-into');
+    });
+    li.addEventListener('dragleave', () => li.classList.remove('drop-into'));
+    li.addEventListener('drop', (e) => {
+      e.preventDefault();
+      li.classList.remove('drop-into');
+      if (dragId) window.api.moveToGroup(dragId, g.id);
+    });
+    return li;
+  }
+
+  function accountRow(a, inGroup) {
+    const compact = !!state.settings.compact;
+    const li = document.createElement('li');
+    li.tabIndex = 0;
+    const tips = [a.name];
+    if (a.popped) tips.push('in its own window');
+    if (a.id === state.splitId) tips.push('split view');
+    if (a.proxy) tips.push(`proxy ${a.proxy.host}:${a.proxy.port}`);
+    li.title = tips.length > 1 ? `${tips[0]} (${tips.slice(1).join(', ')})` : a.name;
+    li.draggable = editing !== a.id;
+    li.className = [
+      inGroup ? 'in-group' : '',
+      a.id === state.activeId && !a.popped ? 'active' : '',
+      a.id === state.splitId && !a.popped ? 'split' : '',
+    ].filter(Boolean).join(' ');
+    li.append(makeAvatar(a));
+
+    if (editing === a.id && !compact) {
+      li.append(makeInput(a.name, (v) => {
+        editing = null;
+        if (v) window.api.updateAccount(a.id, { name: v }); else render();
+      }));
+    } else {
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = a.name;
+      li.append(name);
+    }
+
+    const tag = (icon, title) => {
+      const t = document.createElement('span');
+      t.className = 'tag';
+      t.title = title;
+      t.innerHTML = icon;
+      li.append(t);
+    };
+    if (a.id === state.splitId && !a.popped) tag(ICON.columns, 'Shown beside the current account');
+    if (a.popped) tag(ICON.external, 'Open in its own window');
+    if (a.proxy) tag(ICON.globe, `Using proxy ${a.proxy.host}:${a.proxy.port}`);
+    if (a.muteNotifications) tag(ICON.bellOff, 'Notifications muted');
+
+    if (a.mentions > 0) {
+      const b = document.createElement('span');
+      b.className = 'badge';
+      b.textContent = a.mentions > 99 ? '99+' : a.mentions;
+      li.append(b);
+    } else if (a.unread) {
+      const d = document.createElement('span');
+      d.className = 'dot';
+      li.append(d);
+    }
+
+    if (editing !== a.id) {
+      const edit = document.createElement('button');
+      edit.className = 'edit';
+      edit.title = 'Rename';
+      edit.setAttribute('aria-label', `Rename ${a.name}`);
+      edit.innerHTML = ICON.pencil;
+      edit.addEventListener('click', (e) => { e.stopPropagation(); editing = a.id; render(); });
+      li.append(edit);
+    }
+
+    li.addEventListener('click', (e) => {
+      if (e.ctrlKey || e.metaKey) window.api.splitWith(a.id); else window.api.switchTo(a.id);
+    });
+    li.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === li) window.api.switchTo(a.id); });
+    li.addEventListener('dblclick', () => { editing = a.id; render(); });
+    li.addEventListener('contextmenu', (e) => { e.preventDefault(); window.api.menu(a.id); });
+
+    li.addEventListener('dragstart', (e) => {
+      dragId = a.id;
+      e.dataTransfer.setData('text/plain', a.id);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    li.addEventListener('dragover', (e) => {
+      if (!dragId || dragId === a.id) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const r = li.getBoundingClientRect();
+      const after = e.clientY > r.top + r.height / 2;
+      li.classList.toggle('drop-before', !after);
+      li.classList.toggle('drop-after', after);
+    });
+    li.addEventListener('dragleave', () => li.classList.remove('drop-before', 'drop-after'));
+    li.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const r = li.getBoundingClientRect();
+      const after = e.clientY > r.top + r.height / 2;
+      clearDropMarks();
+      if (dragId && dragId !== a.id) window.api.reorder(dragId, a.id, after);
+    });
+    li.addEventListener('dragend', (e) => {
+      const id = dragId;
+      dragId = null;
+      clearDropMarks();
+      // Not dropped on a valid target: if the cursor left the window, pop the account out.
+      if (e.dataTransfer.dropEffect === 'none') window.api.dragEnd(id);
+      render();
+    });
+    return li;
   }
 
   document.getElementById('add').addEventListener('click', () => {
     if (state.settings.compact) { window.api.add(''); return; }
     editing = 'new';
     render();
+  });
+  newGroupBtn.addEventListener('click', () => { editing = 'newgroup'; pendingGroupAccount = null; render(); });
+  list.addEventListener('dragover', (e) => {
+    if (dragId && e.target === list) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; list.classList.add('drop-ungroup'); }
+  });
+  list.addEventListener('dragleave', (e) => { if (e.target === list) list.classList.remove('drop-ungroup'); });
+  list.addEventListener('drop', (e) => {
+    if (dragId && e.target === list) { e.preventDefault(); list.classList.remove('drop-ungroup'); window.api.moveToGroup(dragId, null); }
   });
   collapseBtn.addEventListener('click', () => window.api.updateSettings({ collapsed: !state.settings.collapsed }));
   bellBtn.addEventListener('click', () => window.api.toggleNotifs());
@@ -350,8 +484,15 @@
   window.api.onState((s) => {
     state = s;
     // Rebuilding the list mid-drag or mid-typing would cancel it.
-    if (!editing && !dragId) render(); else applyTheme(s.theme);
+    if (!editing && !editingGroup && !dragId) render(); else applyTheme(s.theme);
   });
+  window.api.onStartNewGroup((accountId) => {
+    if (state.settings.compact || state.settings.collapsed) { window.api.groupAdd('', accountId); return; }
+    editing = 'newgroup';
+    pendingGroupAccount = accountId;
+    render();
+  });
+  window.api.onStartGroupRename((id) => { editingGroup = id; render(); });
   window.api.onStartRename((id) => {
     if (state.settings.compact) { window.api.openSettings('account', id); return; }
     editing = id;
