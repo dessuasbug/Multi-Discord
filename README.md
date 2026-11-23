@@ -48,3 +48,10 @@ checks by itself on startup.
 - Notification center: bell button or Ctrl+Shift+N. Click a notification to jump to its account.
 - Do Not Disturb: moon button or Ctrl+Shift+D.
 - Settings: gear button or Ctrl+, (themes, colors, icons, mute, zoom, custom CSS, updates).
+
+## Look and feel
+The window frame is custom and follows the theme: a dark title bar with the Accounts and View
+menus, themed minimize/maximize/close buttons, and dark right-click menus and dialogs.
+Keyboard shortcuts work everywhere, even with the title bar menus hidden
+(Settings > Appearance). The file picker for icon images and hover tooltips are still drawn by
+Windows and can't be themed.

@@ -10,8 +10,15 @@
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
+  * { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
   html, body { height: 100%; margin: 0; }
+  .titlebar {
+    position: fixed; top: 0; left: 0; right: 0; height: 38px; z-index: 5; display: flex; align-items: center;
+    padding: 0 140px 0 14px; background: var(--bg-deep); font-size: 13px; font-weight: 600; color: var(--text);
+    -webkit-app-region: drag; user-select: none; -webkit-user-select: none;
+  }
   body {
+    padding-top: 38px;
     display: flex; background: var(--bg); color: var(--text);
     font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
   }
@@ -101,6 +108,7 @@
 </style>
 </head>
 <body>
+  <div class="titlebar">Multi Discord settings</div>
   <nav>
     <h1>Settings</h1>
     <button data-tab="appearance">Appearance</button>
@@ -126,7 +134,7 @@
       <h2>Layout</h2>
       <label class="switch"><input type="checkbox" id="compact"><span>Compact sidebar (icons only)</span></label>
       <label class="switch"><input type="checkbox" id="collapsed"><span>Collapse the sidebar into a thin strip (Ctrl+B)</span></label>
-      <label class="switch"><input type="checkbox" id="hideMenu"><span>Hide the Edit / Accounts / View menu bar</span></label>
+      <label class="switch"><input type="checkbox" id="hideMenu"><span>Hide the Accounts and View menus in the title bar</span></label>
 
       <h2>Do Not Disturb</h2>
       <label class="switch"><input type="checkbox" id="dnd"><span>Silence desktop notifications from every account</span></label>

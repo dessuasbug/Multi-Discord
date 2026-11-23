@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Overlay</title>
+<style>
+  :root {
+    --bg: #17181c; --bg-deep: #121317; --hover: #22242a; --active: #2f3340; --text: #e3e5ea;
+    --muted: #8a8f9c; --line: #3a3e4b; --field: #101114; --accent: #7d8cff; --on-accent: #fff;
+    --danger: #f04747;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: transparent; }
+  body { font: 13.5px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); user-select: none; -webkit-user-select: none; }
+  #backdrop { position: fixed; inset: 0; }
+  body.modal #backdrop { background: rgba(0, 0, 0, .5); }
+
+  .panel {
+    position: fixed; min-width: 200px; max-width: 440px; padding: 6px;
+    background: color-mix(in srgb, var(--bg) 92%, var(--text) 8%); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, .5);
+  }
+  .item {
+    display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 10px 0 8px;
+    border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+  }
+  .item:hover:not(:disabled), .item:focus-visible, .item.open { background: color-mix(in srgb, var(--accent) 22%, var(--bg)); outline: none; }
+  .item:disabled { opacity: .42; cursor: default; }
+  .mark { flex: none; width: 16px; display: grid; place-items: center; color: var(--accent); }
+  .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .accel { flex: none; color: var(--muted); font-size: 12px; margin-left: 18px; }
+  .chev { flex: none; color: var(--muted); display: grid; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 5px 4px; }
+
+  .card {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100vw - 40px));
+    padding: 22px 22px 18px; background: var(--bg); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .6);
+  }
+  .card h2 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
+  .card p { margin: 0; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+  .card .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+  .btn {
+    min-width: 84px; height: 34px; padding: 0 16px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--hover); color: var(--text); font: inherit; cursor: pointer;
+  }
+  .btn:hover, .btn:focus-visible { background: var(--active); outline: none; }
+  .btn:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <div id="backdrop"></div>
+  <div id="layer"></div>
+  <div class="card" id="card" role="alertdialog" aria-modal="true" hidden>
+    <h2 id="dMsg"></h2>
+    <p id="dDetail"></p>
+    <div class="actions" id="dBtns"></div>
+  </div>
+
+<script>
+  const svg = (inner) => `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+  const CHECK = svg('<path d="M20 6 9 17l-5-5"/>');
+  const DOT = '<svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg>';
+  const CHEV = svg('<path d="m9 18 6-6-6-6"/>');
+
+  const layer = document.getElementById('layer');
+  const card = document.getElementById('card');
+  let panels = []; // open menu panels, root first
+  let dialog = null;
+
+  function applyTheme(t) {
+    const root = document.documentElement.style;
+    for (const [k, v] of Object.entries(t.vars)) root.setProperty(k, v);
+    root.colorScheme = t.scheme;
+    const n = parseInt(t.vars['--accent'].slice(1), 16);
+    const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    root.setProperty('--on-accent', lum > 0.6 ? '#111' : '#fff');
+  }
+
+  function clearAll() {
+    layer.textContent = '';
+    panels = [];
+    card.hidden = true;
+    dialog = null;
+    document.body.classList.remove('modal');
+  }
+
+  function closeAbove(depth) {
+    while (panels.length > depth + 1) panels.pop().el.remove();
+    layer.querySelectorAll('.item.open').forEach((b) => {
+      if (!panels[depth] || !panels[depth].el.contains(b)) return;
+      b.classList.remove('open');
+    });
+  }
+
+  function place(el, x, y, parentRect) {
+    const w = el.offsetWidth, h = el.offsetHeight, vw = innerWidth, vh = innerHeight;
+    let left = x, top = y;
+    if (parentRect) {
+      if (left + w > vw - 6) left = parentRect.left - w + 4;
+    } else if (left + w > vw - 6) {
+      left = vw - w - 6;
+    }
+    if (top + h > vh - 6) top = Math.max(6, vh - h - 6);
+    el.style.left = Math.max(6, left) + 'px';
+    el.style.top = Math.max(6, top) + 'px';
+  }
+
+  function openPanel(items, x, y, depth, parentRect) {
+    closeAbove(depth - 1 >= 0 ? depth - 1 : -1);
+    const el = document.createElement('div');
+    el.className = 'panel';
+    el.setAttribute('role', 'menu');
+    for (const it of items) {
+      if (it.type === 'separator') { el.append(document.createElement('hr')); continue; }
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'item';
+      b.setAttribute('role', it.type === 'checkbox' ? 'menuitemcheckbox' : it.type === 'radio' ? 'menuitemradio' : 'menuitem');
+      b.disabled = !it.enabled;
+      const mark = document.createElement('span');
+      mark.className = 'mark';
+      if (it.checked) { mark.innerHTML = it.type === 'radio' ? DOT : CHECK; b.setAttribute('aria-checked', 'true'); }
+      const label = document.createElement('span');
+      label.className = 'label';
+      label.textContent = it.label || '';
+      b.append(mark, label);
+      if (it.submenu) {
+        const c = document.createElement('span');
+        c.className = 'chev';
+        c.innerHTML = CHEV;
+        b.append(c);
+      } else if (it.accel) {
+        const a = document.createElement('span');
+        a.className = 'accel';
+        a.textContent = it.accel;
+        b.append(a);
+      }
+      b.addEventListener('mouseenter', () => {
+        if (!it.enabled) return;
+        closeAbove(depth);
+        el.querySelectorAll('.item.open').forEach((o) => o.classList.remove('open'));
+        b.focus({ preventScroll: true });
+        if (it.submenu) openSub(b, it, depth);
+      });
+      b.addEventListener('click', () => {
+        if (it.submenu) { openSub(b, it, depth); return; }
+        window.api.overlayPick(it.id);
+      });
+      el.append(b);
+    }
+    layer.append(el);
+    place(el, x, y, parentRect);
+    panels[depth] = { el };
+    return el;
+  }
+
+  function openSub(button, it, depth) {
+    closeAbove(depth);
+    button.classList.add('open');
+    const r = button.getBoundingClientRect();
+    openPanel(it.submenu, r.right - 4, r.top - 6, depth + 1, r);
+  }
+
+  function showMenu(m) {
+    clearAll();
+    openPanel(m.items, m.x, m.y, 0, null);
+  }
+
+  function showDialog(d) {
+    clearAll();
+    dialog = d;
+    document.body.classList.add('modal');
+    document.getElementById('dMsg').textContent = d.message || '';
+    const detail = document.getElementById('dDetail');
+    detail.textContent = d.detail || '';
+    detail.hidden = !d.detail;
+    const box = document.getElementById('dBtns');
+    box.textContent = '';
+    d.buttons.forEach((label, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn' + (i === d.defaultId ? ' primary' : '') + (d.danger && i === 0 ? ' danger' : '');
+      b.textContent = label;
+      b.addEventListener('click', () => window.api.dialogResult(i));
+      box.append(b);
+    });
+    card.hidden = false;
+    const target = box.children[d.defaultId] || box.children[0];
+    setTimeout(() => target && target.focus(), 0);
+  }
+
+  function focusStep(dir) {
+    const panel = panels[panels.length - 1];
+    if (!panel) return;
+    const items = [...panel.el.querySelectorAll('.item:not(:disabled)')];
+    if (!items.length) return;
+    const i = items.indexOf(document.activeElement);
+    items[(i + dir + items.length) % items.length].focus();
+  }
+
+  document.getElementById('backdrop').addEventListener('mousedown', () => {
+    if (!dialog) window.api.overlayClose();
+  });
+  document.getElementById('backdrop').addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (!dialog) window.api.overlayClose();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (dialog) {
+      if (e.key === 'Escape') { e.preventDefault(); window.api.dialogResult(dialog.cancelId); }
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (panels.length > 1) { panels.pop().el.remove(); panels[panels.length - 1].el.querySelector('.item.open')?.focus(); }
+      else window.api.overlayClose();
+    } else if (e.key === 'ArrowDown') { e.preventDefault(); focusStep(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); focusStep(-1); }
+    else if (e.key === 'ArrowRight') {
+      const f = document.activeElement;
+      if (f && f.classList.contains('item') && f.querySelector('.chev')) { e.preventDefault(); f.click(); focusStep(1); }
+    } else if (e.key === 'ArrowLeft' && panels.length > 1) {
+      e.preventDefault();
+      panels.pop().el.remove();
+      panels[panels.length - 1].el.querySelector('.item.open')?.focus();
+    }
+  });
+
+  // The first time the overlay opens, the page may not have its full size yet.
+  function whenSized(fn) {
+    if (innerWidth > 200 && innerHeight > 200) { fn(); return; }
+    const h = () => {
+      if (innerWidth > 200 && innerHeight > 200) { removeEventListener('resize', h); fn(); }
+    };
+    addEventListener('resize', h);
+  }
+  window.api.onOverlayMenu((m) => whenSized(() => showMenu(m)));
+  window.api.onOverlayDialog(showDialog);
+  window.api.onOverlayClear(clearAll);
+  window.api.onState((s) => applyTheme(s.theme));
+  window.api.getState().then((s) => applyTheme(s.theme));
+</script>
+</body>
+</html>

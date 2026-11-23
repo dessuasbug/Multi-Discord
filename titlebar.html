@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Title bar</title>
+<style>
+  :root {
+    --bg: #17181c; --bg-deep: #121317; --hover: #22242a; --active: #2f3340; --text: #e3e5ea;
+    --muted: #8a8f9c; --line: #3a3e4b; --accent: #7d8cff; --on-accent: #fff; --alert: #f04747;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body {
+    display: flex; align-items: center; gap: 4px; padding: 0 140px 0 12px;
+    background: var(--bg-deep); color: var(--text);
+    font: 13px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+    user-select: none; -webkit-user-select: none; -webkit-app-region: drag;
+  }
+  .logo { width: 18px; height: 18px; border-radius: 5px; flex: none; margin-right: 4px; }
+  .title { font-weight: 600; margin-right: 10px; white-space: nowrap; }
+  .pill {
+    display: none; min-width: 18px; height: 18px; padding: 0 6px; margin: 0 8px 0 -4px; border-radius: 9px;
+    background: var(--alert); color: #fff; font-size: 11px; font-weight: 600; place-items: center;
+  }
+  .pill.on { display: grid; }
+  nav { display: flex; gap: 2px; -webkit-app-region: no-drag; }
+  nav[hidden] { display: none; }
+  nav button {
+    height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent;
+    color: var(--muted); font: inherit; cursor: pointer;
+  }
+  nav button:hover, nav button:focus-visible, nav button.open { background: var(--hover); color: var(--text); outline: none; }
+</style>
+</head>
+<body>
+  <img class="logo" src="assets/icon.png" alt="">
+  <span class="title">Multi Discord</span>
+  <span class="pill" id="pill"></span>
+  <nav id="menus">
+    <button data-menu="accounts">Accounts</button>
+    <button data-menu="view">View</button>
+  </nav>
+<script>
+  function applyTheme(t) {
+    const root = document.documentElement.style;
+    for (const [k, v] of Object.entries(t.vars)) root.setProperty(k, v);
+    root.colorScheme = t.scheme;
+  }
+  function render(s) {
+    applyTheme(s.theme);
+    document.getElementById('menus').hidden = !!s.settings.hideMenuBar;
+    const total = s.accounts.reduce((n, a) => n + (a.mentions || 0), 0);
+    const pill = document.getElementById('pill');
+    pill.textContent = total > 99 ? '99+' : total;
+    pill.classList.toggle('on', total > 0);
+  }
+  document.querySelectorAll('#menus button').forEach((b) =>
+    b.addEventListener('click', () => {
+      const r = b.getBoundingClientRect();
+      window.api.openAppMenu(b.dataset.menu, { left: Math.round(r.left), bottom: Math.round(r.bottom) });
+    }));
+
+  // Fallback window dragging, used only if the native drag region isn't honoured.
+  let dragging = false;
+  const endDrag = () => { if (dragging) { dragging = false; window.api.winDragEnd(); } };
+  document.body.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('nav')) return;
+    dragging = true;
+    document.body.setPointerCapture(e.pointerId);
+    window.api.winDragStart();
+  });
+  document.body.addEventListener('pointerup', endDrag);
+  document.body.addEventListener('pointercancel', endDrag);
+  document.body.addEventListener('lostpointercapture', endDrag);
+  document.body.addEventListener('dblclick', (e) => { if (!e.target.closest('nav')) window.api.winToggleMax(); });
+
+  window.api.onState(render);
+  window.api.getState().then(render);
+</script>
+</body>
+</html>

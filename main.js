@@ -11,6 +11,7 @@ const SIDEBAR_COMPACT = 72;
 const SIDEBAR_COLLAPSED = 22;
 const NOTIF_WIDTH = 380;
 const POP_BAR = 38;
+const TITLE_H = 38;
 const DIVIDER_W = 8;
 const MIN_PANE = 320;
 const PROXY_TYPES = ['none', 'http', 'https', 'socks4', 'socks5'];
@@ -51,6 +52,13 @@ let sidebar = null;
 let notifView = null;
 let settingsWin = null;
 let divider = null;
+let titlebar = null;
+let overlayView = null;
+let overlayOpen = false;
+let overlayDialogResolve = null;
+let overlayDialogCancel = -1;
+let menuSeq = 0;
+const overlayActions = new Map();
 let notifOpen = false;
 let quitting = false;
 let accounts = [];
@@ -172,6 +180,11 @@ function saveNotifs() {
 const acct = (id) => accounts.find((a) => a.id === id);
 const sidebarWidth = () => (settings.collapsed ? SIDEBAR_COLLAPSED : settings.compact ? SIDEBAR_COMPACT : SIDEBAR_FULL);
 const themeBg = () => THEMES[settings.theme].vars['--bg'];
+const overlayFor = (height = TITLE_H) => ({
+  color: THEMES[settings.theme].vars['--bg-deep'],
+  symbolColor: THEMES[settings.theme].vars['--text'],
+  height,
+});
 
 function getState() {
   const t = THEMES[settings.theme];
@@ -200,7 +213,7 @@ function getState() {
 
 function pushState() {
   const s = getState();
-  const targets = [sidebar, settingsWin, notifView, divider, ...[...popouts.values()].map((p) => p.bar)];
+  const targets = [sidebar, settingsWin, notifView, divider, titlebar, overlayView, ...[...popouts.values()].map((p) => p.bar)];
   for (const w of targets) {
     if (w && !w.webContents.isDestroyed()) w.webContents.send('state', s);
   }
@@ -289,12 +302,15 @@ function applyWindowSettings() {
   const wins = [win, ...[...popouts.values()].map((p) => p.win)].filter((w) => w && !w.isDestroyed());
   for (const w of wins) {
     w.setBackgroundColor(bg);
-    try { w.setMenuBarVisibility(!settings.hideMenuBar); } catch { /* not supported */ }
+    try { w.setTitleBarOverlay(overlayFor()); } catch { /* not supported here */ }
   }
   layout();
   for (const p of popouts.values()) p.layout();
   setTimeout(() => { layout(); for (const p of popouts.values()) p.layout(); }, 80);
-  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.setBackgroundColor(bg);
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.setBackgroundColor(bg);
+    try { settingsWin.setTitleBarOverlay(overlayFor()); } catch { /* not supported here */ }
+  }
 }
 
 // ---------- layout ----------
@@ -306,10 +322,14 @@ function splitShown(areaWidth) {
 
 function layout() {
   if (!win) return;
-  const { width, height } = win.getContentBounds();
+  const { width, height: fullH } = win.getContentBounds();
+  const height = Math.max(0, fullH - TITLE_H);
+  const top = TITLE_H;
   const sw = sidebarWidth();
   const area = Math.max(0, width - sw);
-  sidebar.setBounds({ x: 0, y: 0, width: sw, height });
+  titlebar.setBounds({ x: 0, y: 0, width, height: TITLE_H });
+  overlayView.setBounds({ x: 0, y: 0, width, height: fullH });
+  sidebar.setBounds({ x: 0, y: top, width: sw, height });
 
   const showSplit = splitShown(area);
   let leftW = area;
@@ -320,16 +340,16 @@ function layout() {
   for (const [id, v] of views) {
     if (popouts.has(id)) continue;
     if (showSplit && id === splitId) {
-      v.setBounds({ x: sw + leftW + DIVIDER_W, y: 0, width: area - leftW - DIVIDER_W, height });
+      v.setBounds({ x: sw + leftW + DIVIDER_W, y: top, width: area - leftW - DIVIDER_W, height });
       v.setVisible(true);
     } else {
-      v.setBounds({ x: sw, y: 0, width: showSplit ? leftW : area, height });
+      v.setBounds({ x: sw, y: top, width: showSplit ? leftW : area, height });
       v.setVisible(id === activeId);
     }
   }
   divider.setVisible(showSplit);
-  if (showSplit) divider.setBounds({ x: sw + leftW, y: 0, width: DIVIDER_W, height });
-  notifView.setBounds({ x: sw, y: 0, width: Math.min(NOTIF_WIDTH, area), height });
+  if (showSplit) divider.setBounds({ x: sw + leftW, y: top, width: DIVIDER_W, height });
+  notifView.setBounds({ x: sw, y: top, width: Math.min(NOTIF_WIDTH, area), height });
 }
 
 function openSplit(id) {
@@ -339,7 +359,7 @@ function openSplit(id) {
   layout();
   changed();
   if (!splitShown()) {
-    dialog.showMessageBox(win, {
+    showDialog({
       type: 'info',
       message: 'Make the window wider to see split view.',
       detail: 'Each side needs about 320 pixels. It will appear as soon as there is room.',
@@ -500,6 +520,7 @@ function createView(a) {
   });
 
   view.webContents.on('dom-ready', () => applyAccount(a.id, { css: true }));
+  hookShortcuts(view.webContents);
 
   view.setVisible(false);
   win.contentView.addChildView(view);
@@ -552,14 +573,14 @@ async function removeAccount(id) {
   const a = acct(id);
   if (!a) return;
   if (accounts.length === 1) {
-    dialog.showMessageBox(win, {
+    showDialog({
       type: 'info',
       message: 'You need at least one account slot.',
       detail: 'Add another account first, then remove this one.',
     });
     return;
   }
-  const { response } = await dialog.showMessageBox(win, {
+  const response = await showDialog({
     type: 'warning',
     buttons: ['Remove', 'Cancel'],
     defaultId: 1,
@@ -602,7 +623,7 @@ async function removeAccount(id) {
 function popOut(id, at) {
   if (popouts.has(id) || !views.has(id) || !win) return;
   if (!firstDocked(id)) {
-    dialog.showMessageBox(win, {
+    showDialog({
       type: 'info',
       message: 'Keep one account in the main window.',
       detail: 'Dock another account back first, or add a new account.',
@@ -622,6 +643,8 @@ function popOut(id, at) {
     title: `${a.name} - Multi Discord`,
     backgroundColor: themeBg(),
     icon: ICON_PATH,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: overlayFor(POP_BAR),
   });
   const bar = new WebContentsView({
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true },
@@ -649,7 +672,7 @@ function popOut(id, at) {
     dockInternal(id, { activate: true });
   });
   bar.webContents.loadFile(path.join(__dirname, 'popout.html'), { query: { id } });
-  try { pw.setMenuBarVisibility(!settings.hideMenuBar); } catch { /* ignore */ }
+  hookShortcuts(bar.webContents);
   p.layout();
   setTimeout(p.layout, 80);
 
@@ -741,7 +764,7 @@ function setupUpdater() {
   });
   autoUpdater.on('update-downloaded', async (i) => {
     setUpdater('ready', `Version ${i.version} is ready to install.`);
-    const { response } = await dialog.showMessageBox(win, {
+    const response = await showDialog({
       type: 'info',
       buttons: ['Restart now', 'Later'],
       defaultId: 0,
@@ -787,6 +810,8 @@ function openSettings(tab, accountId) {
     title: 'Multi Discord settings',
     backgroundColor: themeBg(),
     icon: ICON_PATH,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: overlayFor(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -817,70 +842,213 @@ function zoom(delta) {
   changed();
 }
 
+function menuTemplates() {
+  return {
+    accounts: [
+      ...accounts.slice(0, 9).map((a, i) => ({
+        label: a.name,
+        accelerator: `CmdOrCtrl+${i + 1}`,
+        click: () => activate(a.id),
+      })),
+      { type: 'separator' },
+      {
+        label: 'Show beside current account',
+        submenu: accounts
+          .filter((a) => a.id !== activeId && !popouts.has(a.id))
+          .map((a) => ({ label: a.name, click: () => openSplit(a.id) })),
+      },
+      { label: 'Close split view', enabled: !!splitId, click: closeSplit },
+      { type: 'separator' },
+      { label: 'Notification center', accelerator: 'CmdOrCtrl+Shift+N', click: () => setNotifOpen(!notifOpen) },
+      { label: 'Collapse or expand sidebar', accelerator: 'CmdOrCtrl+B', click: () => updateSettings({ collapsed: !settings.collapsed }) },
+      {
+        label: 'Do Not Disturb',
+        type: 'checkbox',
+        checked: settings.dnd,
+        accelerator: 'CmdOrCtrl+Shift+D',
+        click: () => updateSettings({ dnd: !settings.dnd }),
+      },
+      { type: 'separator' },
+      {
+        label: popouts.has(currentId()) ? 'Dock current account back' : 'Pop out current account',
+        accelerator: 'CmdOrCtrl+Shift+O',
+        click: () => togglePopOut(currentId()),
+      },
+      {
+        label: 'Reload current account',
+        accelerator: 'CmdOrCtrl+R',
+        click: () => views.get(currentId())?.webContents.reload(),
+      },
+      {
+        label: 'Developer tools',
+        accelerator: 'CmdOrCtrl+Shift+I',
+        click: () => views.get(currentId())?.webContents.toggleDevTools(),
+      },
+      { type: 'separator' },
+      { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => openSettings('appearance') },
+      { label: 'Check for updates…', click: () => { openSettings('updates'); checkForUpdates(); } },
+    ],
+    view: [
+      { label: 'Zoom in', accelerator: 'CmdOrCtrl+=', click: () => zoom(0.1) },
+      { label: 'Zoom out', accelerator: 'CmdOrCtrl+-', click: () => zoom(-0.1) },
+      { label: 'Actual size', accelerator: 'CmdOrCtrl+0', click: () => zoom(0) },
+    ],
+  };
+}
+
+// macOS keeps its native menu bar. Windows and Linux use the themed title bar menus.
 function buildMenu() {
-  const template = [
-    ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
+  if (process.platform !== 'darwin') { Menu.setApplicationMenu(null); return; }
+  const t = menuTemplates();
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { role: 'appMenu' },
     { role: 'editMenu' },
-    {
-      label: 'Accounts',
-      submenu: [
-        ...accounts.slice(0, 9).map((a, i) => ({
-          label: a.name,
-          accelerator: `CmdOrCtrl+${i + 1}`,
-          click: () => activate(a.id),
-        })),
-        {
-          label: 'Show beside current account',
-          submenu: accounts
-            .filter((a) => a.id !== activeId && !popouts.has(a.id))
-            .map((a) => ({ label: a.name, click: () => openSplit(a.id) })),
-          enabled: accounts.some((a) => a.id !== activeId && !popouts.has(a.id)),
-        },
-        { label: 'Close split view', enabled: !!splitId, click: closeSplit },
-        { type: 'separator' },
-        { label: 'Notification center', accelerator: 'CmdOrCtrl+Shift+N', click: () => setNotifOpen(!notifOpen) },
-        { label: 'Collapse or expand sidebar', accelerator: 'CmdOrCtrl+B', click: () => updateSettings({ collapsed: !settings.collapsed }) },
-        {
-          label: 'Do Not Disturb',
-          type: 'checkbox',
-          checked: settings.dnd,
-          accelerator: 'CmdOrCtrl+Shift+D',
-          click: () => updateSettings({ dnd: !settings.dnd }),
-        },
-        { type: 'separator' },
-        {
-          label: popouts.has(currentId()) ? 'Dock current account back' : 'Pop out current account',
-          accelerator: 'CmdOrCtrl+Shift+O',
-          click: () => togglePopOut(currentId()),
-        },
-        {
-          label: 'Reload current account',
-          accelerator: 'CmdOrCtrl+R',
-          click: () => views.get(currentId())?.webContents.reload(),
-        },
-        {
-          label: 'Developer tools',
-          accelerator: 'CmdOrCtrl+Shift+I',
-          click: () => views.get(currentId())?.webContents.toggleDevTools(),
-        },
-        { type: 'separator' },
-        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => openSettings('appearance') },
-        { label: 'Check for updates…', click: () => { openSettings('updates'); checkForUpdates(); } },
-      ],
-    },
-    {
-      label: 'View',
-      submenu: [
-        { label: 'Zoom in', accelerator: 'CmdOrCtrl+=', click: () => zoom(0.1) },
-        { label: 'Zoom out', accelerator: 'CmdOrCtrl+-', click: () => zoom(-0.1) },
-        { label: 'Actual size', accelerator: 'CmdOrCtrl+0', click: () => zoom(0) },
-      ],
-    },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+    { label: 'Accounts', submenu: t.accounts },
+    { label: 'View', submenu: t.view },
+  ]));
+}
+
+// Keyboard shortcuts work on every view, so they don't depend on a native menu.
+function handleShortcut(event, input) {
+  if (process.platform === 'darwin' || input.type !== 'keyDown' || !input.control || input.alt) return;
+  const k = input.key.length === 1 ? input.key.toLowerCase() : input.key;
+  let fn = null;
+  if (!input.shift && /^[1-9]$/.test(k)) fn = () => { const a = accounts[Number(k) - 1]; if (a) activate(a.id); };
+  else if (input.shift && k === 'n') fn = () => setNotifOpen(!notifOpen);
+  else if (input.shift && k === 'd') fn = () => updateSettings({ dnd: !settings.dnd });
+  else if (input.shift && k === 'o') fn = () => togglePopOut(currentId());
+  else if (input.shift && k === 'i') fn = () => views.get(currentId())?.webContents.toggleDevTools();
+  else if (!input.shift && k === 'b') fn = () => updateSettings({ collapsed: !settings.collapsed });
+  else if (!input.shift && k === 'r') fn = () => views.get(currentId())?.webContents.reload();
+  else if (!input.shift && k === ',') fn = () => openSettings('appearance');
+  else if (k === '=' || k === '+') fn = () => zoom(0.1);
+  else if (!input.shift && k === '-') fn = () => zoom(-0.1);
+  else if (!input.shift && k === '0') fn = () => zoom(0);
+  if (fn) { event.preventDefault(); fn(); }
+}
+function hookShortcuts(wc) { wc.on('before-input-event', handleShortcut); }
+
+// ---------- themed menus and dialogs (drawn by overlay.html) ----------
+const accelLabel = (a) => (a ? String(a).replace(/CmdOrCtrl/g, process.platform === 'darwin' ? 'Cmd' : 'Ctrl') : '');
+
+function serializeMenu(items) {
+  return items.filter(Boolean).map((it) => {
+    if (it.type === 'separator') return { type: 'separator' };
+    const id = String(++menuSeq);
+    const out = {
+      id,
+      label: it.label || '',
+      type: it.type || 'normal',
+      checked: !!it.checked,
+      enabled: it.enabled !== false && !(it.submenu && it.submenu.length === 0),
+      accel: accelLabel(it.accelerator),
+    };
+    if (it.submenu) out.submenu = serializeMenu(it.submenu);
+    if (it.click) overlayActions.set(id, it.click);
+    return out;
+  });
+}
+
+function openOverlay() {
+  overlayOpen = true;
+  overlayView.setVisible(true);
+  win.contentView.addChildView(overlayView); // bring to front
+  layout();
+  overlayView.webContents.focus();
+}
+
+function closeOverlay() {
+  if (!overlayOpen) return;
+  overlayOpen = false;
+  overlayActions.clear();
+  overlayView.setVisible(false);
+  overlayView.webContents.send('overlay-clear');
+  if (overlayDialogResolve) {
+    const r = overlayDialogResolve;
+    overlayDialogResolve = null;
+    r(overlayDialogCancel);
+  }
+  const wc = views.get(activeId)?.webContents;
+  if (wc && !popouts.has(activeId) && !notifOpen) wc.focus();
+}
+
+function showMenu(items, pos) {
+  if (!win) return;
+  closeOverlay();
+  let x; let y;
+  if (pos) { x = pos.x; y = pos.y; } else {
+    const pt = screen.getCursorScreenPoint();
+    const b = win.getContentBounds();
+    x = pt.x - b.x;
+    y = pt.y - b.y;
+  }
+  overlayView.webContents.send('overlay-menu', { items: serializeMenu(items), x, y });
+  openOverlay();
+}
+
+function showDialog(opts) {
+  return new Promise((resolve) => {
+    if (!win) { resolve(-1); return; }
+    closeOverlay();
+    const buttons = opts.buttons && opts.buttons.length ? opts.buttons : ['OK'];
+    overlayDialogResolve = resolve;
+    overlayDialogCancel = Number.isInteger(opts.cancelId) ? opts.cancelId : buttons.length - 1;
+    overlayView.webContents.send('overlay-dialog', {
+      message: opts.message || '',
+      detail: opts.detail || '',
+      buttons,
+      defaultId: Number.isInteger(opts.defaultId) ? opts.defaultId : 0,
+      cancelId: overlayDialogCancel,
+      danger: opts.type === 'warning',
+    });
+    openOverlay();
+  });
 }
 
 // ---------- IPC ----------
+ipcMain.on('overlay-pick', (_e, id) => {
+  const fn = overlayActions.get(String(id));
+  closeOverlay();
+  if (fn) setTimeout(fn, 0);
+});
+ipcMain.on('overlay-close', () => closeOverlay());
+ipcMain.on('dialog-result', (_e, index) => {
+  const r = overlayDialogResolve;
+  overlayDialogResolve = null;
+  closeOverlay();
+  if (r) r(Number.isInteger(index) ? index : overlayDialogCancel);
+});
+ipcMain.on('app-menu', (_e, name, rect) => {
+  const t = menuTemplates();
+  if (!t[name] || !rect) return;
+  showMenu(t[name], { x: Number(rect.left) || 0, y: (Number(rect.bottom) || TITLE_H) + 2 });
+});
+
+function windowForSender(sender) {
+  if (titlebar && sender.id === titlebar.webContents.id) return win;
+  for (const p of popouts.values()) if (p.bar.webContents.id === sender.id) return p.win;
+  return null;
+}
+let dragTimer = null;
+ipcMain.on('win-drag-start', (e) => {
+  const w = windowForSender(e.sender);
+  if (!w || w.isMaximized() || w.isFullScreen()) return;
+  clearInterval(dragTimer);
+  const c0 = screen.getCursorScreenPoint();
+  const b0 = w.getBounds();
+  const t0 = Date.now();
+  dragTimer = setInterval(() => {
+    if (w.isDestroyed() || Date.now() - t0 > 30000) { clearInterval(dragTimer); return; }
+    const c = screen.getCursorScreenPoint();
+    w.setBounds({ x: b0.x + c.x - c0.x, y: b0.y + c.y - c0.y, width: b0.width, height: b0.height });
+  }, 8);
+});
+ipcMain.on('win-drag-end', () => clearInterval(dragTimer));
+ipcMain.on('win-toggle-max', (e) => {
+  const w = windowForSender(e.sender);
+  if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); }
+});
+
 ipcMain.handle('get-state', () => getState());
 ipcMain.on('switch', (_e, id) => activate(id));
 
@@ -978,12 +1146,12 @@ ipcMain.on('split-drag', (_e, screenX) => {
 ipcMain.on('split-drag-end', () => changed());
 ipcMain.on('split-reset', () => { settings.splitRatio = 0.5; layout(); changed(); });
 ipcMain.on('split-menu', () => {
-  Menu.buildFromTemplate([
+  showMenu([
     { label: 'Equal width', click: () => { settings.splitRatio = 0.5; layout(); changed(); } },
     { label: 'Swap sides', click: swapSplit },
     { type: 'separator' },
     { label: 'Close split view', click: closeSplit },
-  ]).popup({ window: win });
+  ]);
 });
 
 ipcMain.on('group-add', (_e, name, accountId) => createGroup(name, accountId));
@@ -1003,7 +1171,7 @@ ipcMain.on('group-menu', (_e, id) => {
   if (!g) return;
   const i = groups.indexOf(g);
   const move = (d) => { groups.splice(i, 1); groups.splice(i + d, 0, g); changed(); };
-  Menu.buildFromTemplate([
+  showMenu([
     {
       label: 'Rename',
       enabled: !settings.compact && !settings.collapsed,
@@ -1021,7 +1189,7 @@ ipcMain.on('group-menu', (_e, id) => {
         changed();
       },
     },
-  ]).popup({ window: win });
+  ]);
 });
 
 ipcMain.handle('set-proxy', async (_e, id, data) => {
@@ -1097,7 +1265,7 @@ ipcMain.on('menu', (_e, id) => {
   const a = acct(id);
   if (!a) return;
   const p = popouts.get(id);
-  Menu.buildFromTemplate([
+  showMenu([
     { label: 'Rename', click: () => sidebar.webContents.send('start-rename', id) },
     { label: 'Account settings…', click: () => openSettings('account', id) },
     {
@@ -1139,7 +1307,7 @@ ipcMain.on('menu', (_e, id) => {
     { label: 'Reload', click: () => views.get(id)?.webContents.reload() },
     { type: 'separator' },
     { label: 'Remove…', click: () => removeAccount(id) },
-  ]).popup({ window: win });
+  ]);
 });
 
 // ---------- app lifecycle ----------
@@ -1161,7 +1329,17 @@ if (!app.requestSingleInstanceLock()) {
       title: 'Multi Discord',
       backgroundColor: themeBg(),
       icon: ICON_PATH,
+      titleBarStyle: 'hidden',
+      titleBarOverlay: overlayFor(),
     });
+
+    const plainView = () => new WebContentsView({
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true },
+    });
+    titlebar = plainView();
+    titlebar.webContents.on('will-navigate', (e) => e.preventDefault());
+    win.contentView.addChildView(titlebar);
+    titlebar.webContents.loadFile(path.join(__dirname, 'titlebar.html'));
 
     sidebar = new WebContentsView({
       webPreferences: {
@@ -1199,6 +1377,14 @@ if (!app.requestSingleInstanceLock()) {
     accounts.forEach(createView);
     win.contentView.addChildView(divider);
     win.contentView.addChildView(notifView);
+
+    overlayView = plainView();
+    overlayView.setBackgroundColor('#00000000');
+    overlayView.webContents.on('will-navigate', (e) => e.preventDefault());
+    overlayView.webContents.loadFile(path.join(__dirname, 'overlay.html'));
+    overlayView.setVisible(false);
+    win.contentView.addChildView(overlayView);
+    [titlebar, sidebar, divider, notifView].forEach((v) => hookShortcuts(v.webContents));
     if (windowState && windowState.maximized) win.maximize();
 
     win.on('resize', () => { layout(); scheduleWindowState(); });
