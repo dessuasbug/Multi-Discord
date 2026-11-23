@@ -452,6 +452,37 @@ function setGroup(accountId, groupId) {
   changed();
 }
 
+// ---------- clean shutdown ----------
+// Save everything and let the Discord pages close properly before the app exits,
+// instead of killing them mid-write.
+let shuttingDown = false;
+function flushAll() {
+  for (const v of views.values()) {
+    try {
+      const ses = v.webContents.session;
+      ses.flushStorageData();
+      ses.cookies.flushStore().catch(() => {});
+    } catch { /* ignore */ }
+  }
+}
+function gracefulShutdown(done) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  try { saveWindowStateNow(); } catch { /* ignore */ }
+  try { saveStore(); } catch { /* ignore */ }
+  try { clearTimeout(notifTimer); fs.writeFileSync(notifPath(), JSON.stringify(notifications.slice(0, 100))); } catch { /* ignore */ }
+  for (const w of [win, settingsWin, ...[...popouts.values()].map((p) => p.win)]) {
+    try { if (w && !w.isDestroyed()) w.hide(); } catch { /* ignore */ }
+  }
+  flushAll();
+  for (const v of views.values()) { try { v.webContents.close(); } catch { /* ignore */ } }
+  setTimeout(() => {
+    flushAll();
+    quitting = true;
+    (done || (() => app.quit()))();
+  }, 900);
+}
+
 // ---------- window size and position ----------
 let wsTimer = null;
 function saveWindowStateNow() {
@@ -1316,7 +1347,7 @@ if (process.platform === 'win32') app.setAppUserModelId('com.local.multidiscord'
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => focusWindow(win));
+  app.on('second-instance', () => { if (!shuttingDown) focusWindow(win); });
   app.on('before-quit', () => { quitting = true; });
 
   app.whenReady().then(() => {
@@ -1391,7 +1422,8 @@ if (!app.requestSingleInstanceLock()) {
     win.on('move', scheduleWindowState);
     win.on('maximize', scheduleWindowState);
     win.on('unmaximize', scheduleWindowState);
-    win.on('close', saveWindowStateNow);
+    win.on('close', (e) => { if (!shuttingDown) { e.preventDefault(); gracefulShutdown(); } });
+    setInterval(flushAll, 15000);
     win.on('enter-full-screen', layout);
     win.on('leave-full-screen', layout);
     win.on('closed', () => {
